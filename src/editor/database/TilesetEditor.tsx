@@ -12,7 +12,7 @@ type Mode = 'passage' | 'bush' | 'ladder' | 'counter' | 'damage' | 'terrain';
 const T = TILE_SIZE;
 
 export function TilesetEditor({ t, set }: { t: Tileset; set: (fn: (t: Tileset) => void) => void }) {
-  const assets = useEditor((s) => s.project!.assets.filter((a) => a.kind === 'tileset'));
+  const assets = useEditor((s) => s.project!.assets).filter((a) => a.kind === 'tileset');
   const [tab, setTab] = useState(0);
   const [mode, setMode] = useState<Mode>('passage');
   const ref = useRef<HTMLCanvasElement>(null);

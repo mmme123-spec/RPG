@@ -5,6 +5,7 @@ import type { AudioRef, CharacterRef, FaceRef } from '../../core/types';
 import { BUILTIN_BGM, BUILTIN_BGS, BUILTIN_CHARACTERS, BUILTIN_FACES, BUILTIN_ME, BUILTIN_SE, ICON_COLUMNS, ICON_SIZE, BUILTIN_ICONS } from '../../core/builtins';
 import { useEditor } from '../store/store';
 import { getImages } from './images';
+import { AudioEngine } from '../../audio/engine';
 
 export function Field({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
   return (
@@ -177,7 +178,7 @@ export function IconPicker({ value, onChange }: { value: number; onChange: (v: n
 
 /** Builtin + uploaded character sheets. */
 export function CharacterPicker({ value, onChange, allowNone }: { value: CharacterRef | null; onChange: (v: CharacterRef | null) => void; allowNone?: boolean }) {
-  const assets = useEditor((s) => s.project!.assets.filter((a) => a.kind === 'character'));
+  const assets = useEditor((s) => s.project!.assets).filter((a) => a.kind === 'character');
   const [open, setOpen] = useState(false);
   const options: { ref: CharacterRef; label: string }[] = [
     ...BUILTIN_CHARACTERS.map((c) => ({ ref: { sheet: `builtin:${c.key}`, index: 0 }, label: c.label })),
@@ -209,7 +210,7 @@ export function CharacterPicker({ value, onChange, allowNone }: { value: Charact
 }
 
 export function FacePicker({ value, onChange }: { value: FaceRef | null; onChange: (v: FaceRef | null) => void }) {
-  const assets = useEditor((s) => s.project!.assets.filter((a) => a.kind === 'face'));
+  const assets = useEditor((s) => s.project!.assets).filter((a) => a.kind === 'face');
   const [open, setOpen] = useState(false);
   const options: FaceRef[] = [
     ...BUILTIN_FACES.flatMap((f) => [0, 1, 2, 3].map((i) => ({ sheet: `builtin:${f.key}`, index: i }))),
@@ -236,9 +237,8 @@ export function FacePicker({ value, onChange }: { value: FaceRef | null; onChang
   );
 }
 
-let previewAudio: import('../../audio/engine').AudioEngine | null = null;
-async function previewSound(ref: AudioRef, kind: 'bgm' | 'se') {
-  const { AudioEngine } = await import('../../audio/engine');
+let previewAudio: AudioEngine | null = null;
+function previewSound(ref: AudioRef, kind: 'bgm' | 'se') {
   if (!previewAudio) previewAudio = new AudioEngine(useEditor.getState().project?.assets ?? []);
   previewAudio.setAssets(useEditor.getState().project?.assets ?? []);
   previewAudio.unlock();
@@ -255,7 +255,7 @@ export function stopPreview() {
 }
 
 export function AudioPicker({ value, onChange, kind, allowNone = true }: { value: AudioRef | null; onChange: (v: AudioRef | null) => void; kind: 'bgm' | 'bgs' | 'me' | 'se'; allowNone?: boolean }) {
-  const assets = useEditor((s) => s.project!.assets.filter((a) => a.kind === 'audio'));
+  const assets = useEditor((s) => s.project!.assets).filter((a) => a.kind === 'audio');
   const builtins = kind === 'bgm' ? BUILTIN_BGM : kind === 'bgs' ? BUILTIN_BGS : kind === 'me' ? BUILTIN_ME : BUILTIN_SE;
   const opts: [string, string][] = [...builtins.map((b): [string, string] => [`builtin:${b.key}`, b.label]), ...assets.map((a): [string, string] => [`asset:${a.id}`, `📁 ${a.name}`])];
   if (allowNone) opts.unshift(['', '(none)']);

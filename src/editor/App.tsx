@@ -9,6 +9,7 @@ import { Palette } from './map/Palette';
 import { EventEditor } from './events/EventEditor';
 import { DatabaseDialog } from './database/Database';
 import { Playtest } from './Playtest';
+import { ErrorBoundary } from './ErrorBoundary';
 import { HelpDialog, ProjectsDialog } from './Projects';
 import { exportGame, exportProject } from './exporter';
 import { saveProject } from './store/storage';
@@ -193,7 +194,13 @@ export function App() {
         </div>
         <div className="group">
           {TOOLS.map(([t, icon, title]) => (
-            <button key={t} className={tool === t && layer !== 'events' ? 'sel' : ''} disabled={layer === 'events'} title={title} onClick={() => set({ tool: t })}>
+            <button
+              key={t}
+              className={tool === t && layer !== 'events' ? 'sel' : ''}
+              disabled={layer === 'events'}
+              title={title}
+              onClick={() => set({ tool: t })}
+            >
               {icon}
             </button>
           ))}
@@ -246,12 +253,14 @@ export function App() {
         </button>
       </footer>
       {toast && <div className="toast">{toast}</div>}
-      {dialog.kind === 'event' && <EventEditor mapId={dialog.mapId} eventId={dialog.eventId} onClose={close} />}
-      {dialog.kind === 'mapProps' && <MapPropertiesDialog mapId={dialog.mapId} onClose={close} />}
-      {dialog.kind === 'database' && <DatabaseDialog tab={dialog.tab} onClose={close} />}
-      {dialog.kind === 'playtest' && <Playtest fromHere={dialog.fromHere} onClose={close} />}
-      {dialog.kind === 'projects' && <ProjectsDialog onClose={close} />}
-      {dialog.kind === 'help' && <HelpDialog onClose={close} />}
+      <ErrorBoundary key={dialog.kind} onReset={close}>
+        {dialog.kind === 'event' && <EventEditor mapId={dialog.mapId} eventId={dialog.eventId} onClose={close} />}
+        {dialog.kind === 'mapProps' && <MapPropertiesDialog mapId={dialog.mapId} onClose={close} />}
+        {dialog.kind === 'database' && <DatabaseDialog tab={dialog.tab} onClose={close} />}
+        {dialog.kind === 'playtest' && <Playtest fromHere={dialog.fromHere} onClose={close} />}
+        {dialog.kind === 'projects' && <ProjectsDialog onClose={close} />}
+        {dialog.kind === 'help' && <HelpDialog onClose={close} />}
+      </ErrorBoundary>
     </div>
   );
 }

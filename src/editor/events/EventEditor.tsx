@@ -225,7 +225,7 @@ function EventEditorInner({ mapId, eventId, onClose }: { mapId: number; eventId:
             </Field>
           </Row>
         </div>
-        <CommandList commands={page.commands} edit={(fn) => setPage((pg) => fn(pg.commands), false)} />
+        <CommandList key={pi} commands={page.commands} edit={(fn) => setPage((pg) => fn(pg.commands), false)} />
       </div>
     </Modal>
   );

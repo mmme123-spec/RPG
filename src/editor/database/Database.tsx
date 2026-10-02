@@ -868,7 +868,6 @@ function TroopForm({ t, set, p }: { t: Troop; set: Setter<Troop>; p: Project }) 
           );
         })}
       </div>
-      <p className="hint">Battle events (e.g. dialogue) can be run via the Battle Processing command's surrounding event instead.</p>
     </>
   );
 }
