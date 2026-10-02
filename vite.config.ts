@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { viteSingleFile } from 'vite-plugin-singlefile';
-import { runtimeSource } from './vite-plugins/runtime-source';
+import { runtimeSource } from './vite-plugins/runtime-source.ts';
 
 // `vite build --mode single` produces one self-contained HTML file
 // (dist-single/index.html) with every script and stylesheet inlined.
