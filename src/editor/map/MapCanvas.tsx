@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GameMap, MapEvent, Project } from '../../core/types';
 import { TILE_SIZE, LAYER_COUNT } from '../../core/tiles';
-import { createEvent } from '../../core/factory';
+import { createEvent, createPage } from '../../core/factory';
 import { nextId } from '../../core/util';
 import { TileRenderer } from '../../render/tilemap';
 import { characterScale } from '../../engine/ui/draw';
@@ -50,7 +50,8 @@ export function MapCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState({ w: 800, h: 600, sx: 0, sy: 0 });
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
-  const drag = useRef<{ startX: number; startY: number; mode: 'paint' | 'rect' | 'moveEvent' | 'pan'; eventId?: number; px?: number; py?: number } | null>(null);
+  const drag = useRef<{ startX: number; startY: number; mode: 'paint' | 'rect' | 'moveEvent' | 'pan'; eventId?: number; px?: number; py?: number; button?: number; moved?: number } | null>(null);
+  const [quick, setQuick] = useState<{ x: number; y: number; cx: number; cy: number } | null>(null);
   const [rect, setRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [, force] = useState(0);
   const cell = T * zoom;
@@ -258,7 +259,7 @@ export function MapCanvas() {
     const { x, y } = cellAt(e);
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     if (e.button === 1 || e.button === 2 || e.altKey) {
-      drag.current = { startX: x, startY: y, mode: 'pan', px: e.clientX, py: e.clientY };
+      drag.current = { startX: x, startY: y, mode: 'pan', px: e.clientX, py: e.clientY, button: e.button, moved: 0 };
       return;
     }
     if (layer === 'events') {
@@ -292,6 +293,7 @@ export function MapCanvas() {
     if (!d) return;
     if (d.mode === 'pan') {
       const el = scrollRef.current!;
+      d.moved! += Math.abs(e.clientX - d.px!) + Math.abs(e.clientY - d.py!);
       el.scrollLeft -= e.clientX - d.px!;
       el.scrollTop -= e.clientY - d.py!;
       d.px = e.clientX;
@@ -322,8 +324,18 @@ export function MapCanvas() {
     }
   };
 
-  const onUp = () => {
-    if (drag.current?.mode === 'rect' && rect) fillRect(rect);
+  const onUp = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (d?.mode === 'pan' && d.button === 2 && d.moved! < 4 && inMap(d.startX, d.startY)) {
+      // a right click without dragging: quick menu (events) or tile picker
+      if (layer === 'events') setQuick({ x: d.startX, y: d.startY, cx: e.clientX, cy: e.clientY });
+      else if (layer === 'regions') useEditor.getState().set({ region: map.regions[d.startY * map.width + d.startX] || 1 });
+      else {
+        const st = useEditor.getState();
+        st.set({ brush: { tiles: [[map.layers[layer][d.startY * map.width + d.startX]]] }, tool: st.tool === 'eraser' || st.tool === 'picker' ? 'pencil' : st.tool });
+      }
+    }
+    if (d?.mode === 'rect' && rect) fillRect(rect);
     setRect(null);
     drag.current = null;
   };
@@ -373,6 +385,100 @@ export function MapCanvas() {
           }}
           onDoubleClick={onDouble}
         />
+      </div>
+      {quick && <QuickMenu {...quick} onClose={() => setQuick(null)} />}
+    </div>
+  );
+}
+
+/** Right-click menu in event mode. */
+function QuickMenu({ x, y, cx, cy, onClose }: { x: number; y: number; cx: number; cy: number; onClose: () => void }) {
+  const st = useEditor.getState();
+  const map = currentMap(st)!;
+  const ev = map.events.find((v) => v.x === x && v.y === y);
+  const mi = (p: Project) => p.maps.findIndex((m) => m.id === map.id);
+  const make = (label: string, fill: (e: MapEvent) => void) => {
+    const id = nextId(map.events);
+    st.update(label, (p) => {
+      const e = createEvent(id, x, y);
+      fill(e);
+      p.maps[mi(p)].events.push(e);
+    });
+    st.set({ selectedEvent: id, dialog: { kind: 'event', mapId: map.id, eventId: id } });
+    onClose();
+  };
+  const item = (label: string, fn: () => void, cls = '') => (
+    <button className={cls} onClick={() => (fn(), onClose())}>
+      {label}
+    </button>
+  );
+  return (
+    <div className="context-back" onPointerDown={(e) => e.target === e.currentTarget && onClose()} onContextMenu={(e) => (e.preventDefault(), onClose())}>
+      <div className="context-menu" style={{ left: cx, top: cy }}>
+        <div className="context-title">
+          ({x}, {y})
+        </div>
+        {ev ? (
+          <>
+            {item('Edit event…', () => st.set({ selectedEvent: ev.id, dialog: { kind: 'event', mapId: map.id, eventId: ev.id } }))}
+            {item(
+              'Delete event',
+              () => st.update('Delete event', (p) => void (p.maps[mi(p)].events = p.maps[mi(p)].events.filter((v) => v.id !== ev.id))),
+              'danger',
+            )}
+          </>
+        ) : (
+          <>
+            {item('New event…', () => make('New event', () => {}))}
+            <button
+              onClick={() =>
+                make('Quick door', (e) => {
+                  e.name = 'Door';
+                  e.pages[0].trigger = 'playerTouch';
+                  e.pages[0].priority = 'below';
+                  e.pages[0].commands = [
+                    { type: 'playSe', audio: { name: 'builtin:door', volume: 80, pitch: 100 } },
+                    { type: 'transferPlayer', mapId: map.id, x, y, direction: 0, fade: 'black' },
+                  ];
+                })
+              }
+            >
+              Quick: door / transfer…
+            </button>
+            <button
+              onClick={() =>
+                make('Quick chest', (e) => {
+                  e.name = 'Chest';
+                  const pg = e.pages[0];
+                  pg.graphic = { kind: 'character', sheet: 'builtin:chest', index: 0, direction: 2, pattern: 1 };
+                  pg.directionFix = true;
+                  pg.walkAnime = false;
+                  pg.commands = [
+                    { type: 'playSe', audio: { name: 'builtin:chest', volume: 80, pitch: 100 } },
+                    { type: 'changeItems', itemKind: 'item', id: 1, op: '+', operand: { kind: 'constant', value: 1 } },
+                    { type: 'showText', face: null, speaker: '', text: 'Found a \\C[6]Potion\\C[0]!', position: 'bottom', background: 'window' },
+                    { type: 'controlSelfSwitch', letter: 'A', value: true },
+                  ];
+                  const open = createPage();
+                  open.conditions = [{ kind: 'selfSwitch', letter: 'A', value: true }];
+                  open.graphic = { kind: 'character', sheet: 'builtin:chest', index: 0, direction: 8, pattern: 1 };
+                  open.directionFix = true;
+                  e.pages.push(open);
+                })
+              }
+            >
+              Quick: treasure chest…
+            </button>
+          </>
+        )}
+        {item('Set player start here', () =>
+          st.update('Set start', (p) => {
+            p.system.startMapId = map.id;
+            p.system.startX = x;
+            p.system.startY = y;
+          }),
+        )}
+        {item('Playtest from here', () => st.set({ dialog: { kind: 'playtest', fromHere: { mapId: map.id, x, y } } }))}
       </div>
     </div>
   );

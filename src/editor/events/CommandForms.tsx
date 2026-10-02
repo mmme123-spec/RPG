@@ -1,8 +1,10 @@
 /** Forms for editing event commands, conditions, values and move routes. */
 
+import { useEffect, useRef } from 'react';
+import { TileRenderer } from '../../render/tilemap';
+import { getImages } from '../components/images';
 import type { CompareOp, Condition, Direction, EventCommand, MoveCode, MoveCommand, MoveRoute, ValueSource } from '../../core/types';
 import { BUILTIN_ANIMATIONS, BUILTIN_ENEMIES, BUILTIN_TITLES } from '../../core/builtins';
-import { createCommand } from '../../core/factory';
 import { AudioPicker, CharacterPicker, Check, FacePicker, Field, IdSelect, NumberInput, Row, Select, SwitchSelect, TextArea, TextInput } from '../components/fields';
 import { useEditor } from '../store/store';
 import { describeMove } from './commands';
@@ -711,9 +713,6 @@ export function LocationForm({ mapId, x, y, onChange, extra }: { mapId: number; 
   );
 }
 
-import { useEffect, useRef } from 'react';
-import { TileRenderer } from '../../render/tilemap';
-import { getImages } from '../components/images';
 
 export function MiniMap({ mapId, x, y, onPick }: { mapId: number; x: number; y: number; onPick: (x: number, y: number) => void }) {
   const p = useP();
@@ -749,4 +748,3 @@ export function MiniMap({ mapId, x, y, onPick }: { mapId: number; x: number; y: 
   );
 }
 
-export { createCommand };

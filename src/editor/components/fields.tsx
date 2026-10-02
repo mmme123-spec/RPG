@@ -276,15 +276,19 @@ export function AudioPicker({ value, onChange, kind, allowNone = true }: { value
 }
 
 export function Modal({ title, onClose, children, wide, footer }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; footer?: ReactNode }) {
+  const backRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      // only the top-most modal closes
+      const all = document.querySelectorAll('.modal-back');
+      if (all[all.length - 1] === backRef.current) onClose();
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
   return (
-    <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div ref={backRef} className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`modal${wide ? ' wide' : ''}`}>
         <header>
           <h2>{title}</h2>
