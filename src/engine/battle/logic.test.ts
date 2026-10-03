@@ -21,8 +21,8 @@ describe('battlers', () => {
     const leon = new GameActor(data, 1);
     const warrior = data.classes.get(1)!;
     expect(leon.level).toBe(1);
-    // class base attack + Short Sword
-    expect(leon.atk).toBe(warrior.params[2].base + data.weapons.get(1)!.params[2]);
+    // class base attack + starting weapon
+    expect(leon.atk).toBe(warrior.params[2].base + data.weapons.get(data.actors.get(1)!.equips[0])!.params[2]);
     expect(leon.hp).toBe(leon.mhp);
     leon.changeLevel(99);
     expect(leon.paramBase(0)).toBe(warrior.params[0].max);
@@ -147,11 +147,12 @@ describe('inventory', () => {
   it('equips items from the inventory', () => {
     const { state } = setup();
     const leon = state.actor(1)!;
+    const start = leon.weapon()!;
     state.gainItem('weapon', 2, 1);
     const atkBefore = leon.atk;
     expect(state.changeEquip(leon, 0, 2)).toBe(true);
-    expect(leon.atk).toBe(atkBefore - 10 + 24);
-    expect(state.numItems('weapon', 1)).toBe(1);
+    expect(leon.atk).toBe(atkBefore - start.params[2] + 24);
+    expect(state.numItems('weapon', start.id)).toBe(1);
     expect(state.numItems('weapon', 2)).toBe(0);
     // mages cannot equip swords
     const mira = state.actor(2)!;
