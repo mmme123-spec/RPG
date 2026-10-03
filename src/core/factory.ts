@@ -371,6 +371,7 @@ export function defaultSystem(): SystemSettings {
     attackSkillId: 1,
     guardSkillId: 2,
     menu: { item: true, skill: true, equip: true, status: true, save: true },
+    combatMode: 'action',
   };
 }
 

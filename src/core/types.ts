@@ -771,6 +771,11 @@ export interface SystemSettings {
   /** Skill used by the Guard command. */
   guardSkillId: number;
   menu: { item: boolean; skill: boolean; equip: boolean; status: boolean; save: boolean };
+  /**
+   * 'action': free movement and real-time shooter combat on the map (mouse aim).
+   * 'turn': classic tile movement and turn-based side-view battles.
+   */
+  combatMode: 'action' | 'turn';
 }
 
 // ---------------------------------------------------------------------------

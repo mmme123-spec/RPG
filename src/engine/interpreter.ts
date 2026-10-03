@@ -155,7 +155,7 @@ export class Interpreter {
         waiting = h.screen.isFading();
         break;
       case 'scene':
-        waiting = h.isSceneBusy();
+        waiting = h.isSceneBusy() || !!h.combatActive?.();
         break;
       case 'picture':
         waiting = h.screen.isPictureMoving(this.waitPicture);
@@ -562,9 +562,7 @@ export class Interpreter {
       case 'battle': {
         const troopId = cmd.troopId || (h.map ? h.map.pickEncounterTroop(h.map.player.x, h.map.player.y) : 0);
         if (!troopId || !h.data.troops.has(troopId)) return true;
-        const branches = cmd.canEscape || cmd.canLose;
         h.requestBattle(troopId, cmd.canEscape, cmd.canLose, (result) => {
-          if (!branches) return;
           if (result === 'win') this.push(cmd.winBranch);
           else if (result === 'escape') this.push(cmd.escapeBranch);
           else this.push(cmd.loseBranch);

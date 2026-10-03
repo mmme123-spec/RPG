@@ -7,6 +7,7 @@ import { makeTestHost } from '../testing';
 
 function world() {
   const project = createEmptyProject();
+  project.system.combatMode = 'turn';
   const map = project.maps[0];
   // a tree trunk at (5,5): impassable
   map.layers[2][5 * map.width + 5] = builtinTileId('treeBottom');

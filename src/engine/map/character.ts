@@ -53,6 +53,8 @@ export class Character {
   animationKey: string | null = null;
   animationFrame = 0;
   bushDepth = 0;
+  /** Set while the character moves freely (action mode); overrides tile-based isMoving(). */
+  freeMoving: boolean | null = null;
 
   constructor(map: MapRuntime) {
     this.map = map;
@@ -79,6 +81,7 @@ export class Character {
   }
 
   isMoving(): boolean {
+    if (this.freeMoving !== null) return this.freeMoving;
     return this.realX !== this.x || this.realY !== this.y;
   }
 

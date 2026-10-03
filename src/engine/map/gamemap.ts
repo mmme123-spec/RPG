@@ -122,6 +122,21 @@ export class MapRuntime {
     return true;
   }
 
+  /** Fully blocked tile (walls, water, trees...) for free movement and bullets. */
+  isSolid(x: number, y: number): boolean {
+    if (!this.isValid(x, y)) return true;
+    for (const f of this.passageFlags(x, y)) {
+      if (f & TF.STAR) continue;
+      return (f & TF.BLOCK_ALL) === TF.BLOCK_ALL;
+    }
+    return false;
+  }
+
+  /** Is a solid event (same priority, visible, not through) standing on this tile? */
+  hasBlockingEvent(x: number, y: number): boolean {
+    return this.eventsAt(x, y).some((e) => e.isNormalPriority() && !e.through && e.graphic.kind !== 'none');
+  }
+
   private anyFlag(x: number, y: number, flag: number): boolean {
     if (!this.isValid(x, y)) return false;
     return this.passageFlags(x, y).some((f) => (f & flag) !== 0);

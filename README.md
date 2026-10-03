@@ -26,7 +26,8 @@ All graphics, music and sound effects are generated procedurally at runtime, so 
 **Engine**
 - Fixed 60 Hz game loop rendering to a canvas, with keyboard, gamepad and touch controls
 - Title screen, map exploration with followers and dashing, a message system, menus (items, skills, equipment, status, save/load), shops and name input
-- Turn-based side-view battles with skills, states, buffs, elements, critical hits, escape, EXP and level-ups
+- **Action combat (default):** free 8-way movement and Nuclear Throne–style real-time fights on the map. Aim with the mouse, shoot or swing your weapon (the weapon type sets the attack: swords and spears slash and deflect bullets; daggers, bows and staves fire projectiles), cast your first attack skill, and dodge-roll through bullets. Enemies spawn around you and chase, lunge or fire bullet patterns; bosses alternate volleys, rings and charges. Damage still comes from the database formulas, and you earn EXP, gold, drops and level-ups. When the lead hero falls, the next party member takes over.
+- **Classic mode:** tile movement and turn-based side-view battles with skills, states, buffs, elements, critical hits and escape. Switch in Database → System → Movement & combat
 - A chiptune music and sound engine (MML), plus weather and screen effects
 - Twelve save slots in browser storage
 
@@ -57,7 +58,7 @@ Keyboard shortcuts:
 | G | Toggle grid |
 | + / − / 0 | Zoom in, zoom out, reset zoom |
 
-In game, arrows/WASD move, Z/Enter/Space confirm, X/Esc cancel or open the menu, and Shift dashes. During a playtest, Ctrl walks through walls and F9 toggles the debug panel.
+In game, arrows/WASD move, the mouse aims, left click (or J) attacks, right click (or K) casts a skill, Shift dodge-rolls, Z/Enter/Space talks or confirms, and X/Esc cancels or opens the menu. Gamepads work too: the right stick aims, RT attacks and LT casts. With only a keyboard, attacks auto-aim at the nearest enemy. During a playtest, Ctrl walks through walls and F9 toggles the debug panel.
 
 ## Project layout
 

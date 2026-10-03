@@ -545,6 +545,8 @@ function buildCave(): GameMap {
         say('Leon', 'Give it back! The whole valley is freezing because of you!', 'hero', 3),
         say('Dark Knight', 'Then come and take it — if you can!', 'darkLord', 3),
         { type: 'shakeScreen', power: 5, speed: 6, duration: 30, wait: true },
+        // in action mode the knight fights on the map, so hide the event sprite meanwhile
+        { type: 'setMoveRoute', target: 0, route: { commands: [{ code: 'transparentOn' }], repeat: false, skippable: true, wait: false } },
         {
           type: 'battle',
           troopId: 12,

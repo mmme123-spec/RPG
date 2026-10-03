@@ -70,10 +70,16 @@ export class MapScene extends Scene {
     }
     g.map.centerOn(g.map.player.realX, g.map.player.realY);
     this.showMapName();
+    g.canvas.style.cursor = g.data.system.combatMode === 'action' ? 'none' : '';
+  }
+
+  override stop(): void {
+    this.game.canvas.style.cursor = '';
   }
 
   override resume(): void {
     this.game.input.clear();
+    this.game.canvas.style.cursor = this.game.data.system.combatMode === 'action' ? 'none' : '';
   }
 
   private autoplay(): void {
@@ -130,7 +136,9 @@ export class MapScene extends Scene {
     g.transfer = null;
     this.fadingForTransfer = false;
     const map = g.map;
+    g.action.abort();
     if (t.mapId !== map.mapId) {
+      g.action.reset();
       if (!map.setup(t.mapId)) return;
       this.animations = [];
       this.autoplay();
@@ -157,7 +165,16 @@ export class MapScene extends Scene {
     this.updateTransfer();
     const active = !g.isTransferring() && g.topScene() === this;
     g.map.player.debugThrough = g.isTest && g.input.ctrl;
+    if (g.action.hitstop > 0) {
+      // freeze frames on impacts
+      g.action.hitstop--;
+      return;
+    }
     g.map.update(active);
+    g.action.update(active && g.map.player.canMove());
+    const pl = g.map.player;
+    if (g.action.isPlayerBlinking()) pl.opacity = 90;
+    else if (pl.opacity === 90) pl.opacity = 255;
     g.screen.update();
     this.msgWin.update();
     for (const a of this.animations) {
@@ -186,7 +203,9 @@ export class MapScene extends Scene {
         ctx.translate(-W / 2, -H / 2);
       }
     }
-    this.view.render(ctx, g.map, W, H, g.screen.shake);
+    const sh = g.action.shake;
+    if (sh > 0) ctx.translate(Math.round((Math.random() - 0.5) * sh * 2), Math.round((Math.random() - 0.5) * sh * 2));
+    this.view.render(ctx, g.map, W, H, g.screen.shake, (cam) => g.action.drawWorld(ctx, cam));
     for (const a of this.animations) a.anim.draw(ctx);
     ctx.restore();
     this.weather.draw(ctx, g.screen.weatherType, g.screen.weatherPower, W, H);
@@ -197,6 +216,7 @@ export class MapScene extends Scene {
       ctx.fillStyle = `rgba(${fc[0]},${fc[1]},${fc[2]},${fc[3] / 255})`;
       ctx.fillRect(0, 0, W, H);
     }
+    g.action.drawHud(ctx);
     this.drawTimer(ctx);
     this.drawMapName(ctx);
     this.msgWin.draw(ctx);

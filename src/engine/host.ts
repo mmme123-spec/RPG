@@ -61,6 +61,8 @@ export interface EngineHost {
   startBalloon(target: Character, type: BalloonType): void;
   /** Run user JavaScript from a Script command or script condition. */
   runScript(code: string, self?: unknown): unknown;
+  /** True while a real-time (action mode) fight is going on. */
+  combatActive?(): boolean;
   /** Show the level-up / skill-learned messages for an actor. */
   log(text: string): void;
 }

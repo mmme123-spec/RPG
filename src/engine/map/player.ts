@@ -29,7 +29,21 @@ export class Follower extends Character {
     this.graphic = actor ? { kind: 'character', sheet: actor.character.sheet, index: actor.character.index, direction: this.direction, pattern: 1 } : { kind: 'none' };
   }
 
+  /** Free movement: walk along the leader's recent path. */
+  followTrail(pt: { x: number; y: number; d: Direction }, moving: boolean): void {
+    this.realX = pt.x;
+    this.realY = pt.y;
+    this.x = Math.round(pt.x);
+    this.y = Math.round(pt.y);
+    this.direction = pt.d;
+    this.freeMoving = moving;
+    this.opacity = this.map.player.opacity;
+    this.updateAnimation();
+    this.refreshBushDepth();
+  }
+
   override update(): void {
+    this.freeMoving = null;
     const p = this.map.player;
     this.moveSpeed = p.realMoveSpeed();
     this.opacity = p.opacity;
@@ -92,6 +106,8 @@ export class Player extends Character {
 
   canMove(): boolean {
     const h = this.map.host;
+    // during a real-time fight the event that started it waits for the result
+    if (h.combatActive?.() && !h.message.isBusy() && !h.isSceneBusy() && !h.isTransferring() && !this.moveRouteForcing) return true;
     if (this.map.isEventRunning() || h.message.isBusy() || h.isSceneBusy() || h.isTransferring()) return false;
     if (this.moveRouteForcing) return false;
     return true;
@@ -100,6 +116,7 @@ export class Player extends Character {
   /** Teleport, including followers. */
   locate(x: number, y: number): void {
     this.setPosition(x, y);
+    this.resetFree();
     for (const f of this.followers) {
       f.setPosition(x, y);
       f.direction = this.direction;
@@ -116,7 +133,158 @@ export class Player extends Character {
     this.encounterCount = Math.floor(r() * n) + Math.floor(r() * n) + 1;
   }
 
+  // --- free movement (action combat mode) -----------------------------------------
+
+  vx = 0;
+  vy = 0;
+  /** Dodge roll in progress. */
+  roll: { dx: number; dy: number; frames: number } | null = null;
+  rollCooldown = 0;
+  /** Facing forced by aiming during combat (0 = follow movement). */
+  aimDirection: Direction | 0 = 0;
+  private trail: { x: number; y: number; d: Direction }[] = [];
+
+  freeMode(): boolean {
+    return this.map.host.data.system.combatMode === 'action';
+  }
+
+  isRolling(): boolean {
+    return this.roll !== null;
+  }
+
+  /** Is (realX, realY) a free spot for the player's body? */
+  fitsAt(rx: number, ry: number): boolean {
+    if (this.isDebugThrough() || this.through) return true;
+    const cx = rx + 0.5;
+    const cy = ry + 0.5;
+    const hw = 0.3;
+    const hh = 0.22;
+    const tx0 = Math.floor(cx - hw);
+    const tx1 = Math.floor(cx + hw);
+    const ty0 = Math.floor(cy - hh);
+    const ty1 = Math.floor(cy + hh);
+    for (let ty = ty0; ty <= ty1; ty++)
+      for (let tx = tx0; tx <= tx1; tx++) {
+        if (this.map.isSolid(tx, ty)) return false;
+        if ((tx !== this.x || ty !== this.y) && this.map.hasBlockingEvent(tx, ty)) return false;
+      }
+    return true;
+  }
+
+  private bumped: { x: number; y: number } | null = null;
+
+  private tryMove(dx: number, dy: number): boolean {
+    if (!dx && !dy) return true;
+    if (this.fitsAt(this.realX + dx, this.realY + dy)) {
+      this.realX += dx;
+      this.realY += dy;
+      return true;
+    }
+    // remember what we bumped into (touch events)
+    const tx = Math.floor(this.realX + 0.5 + Math.sign(dx) * 0.45);
+    const ty = Math.floor(this.realY + 0.5 + Math.sign(dy) * 0.35);
+    this.bumped = { x: tx, y: ty };
+    // slide around corners
+    if (dx && !dy) {
+      for (const n of [0.12, -0.12]) if (this.fitsAt(this.realX + dx, this.realY + n) && this.fitsAt(this.realX, this.realY + n)) return void (this.realY += n * 0.5), true;
+    } else if (dy && !dx) {
+      for (const n of [0.12, -0.12]) if (this.fitsAt(this.realX + n, this.realY + dy) && this.fitsAt(this.realX + n, this.realY)) return void (this.realX += n * 0.5), true;
+    }
+    return false;
+  }
+
+  private updateFree(): void {
+    const input = this.map.host.input as import('../input').Input;
+    const combat = this.map.host.combatActive?.() ?? false;
+    const mv = typeof input.moveVector === 'function' ? input.moveVector() : { x: 0, y: 0 };
+    if (this.rollCooldown > 0) this.rollCooldown--;
+    if (!this.roll && input.isTriggered('shift') && this.rollCooldown === 0 && !this.map.map.disableDash) {
+      let dx = mv.x;
+      let dy = mv.y;
+      if (!dx && !dy) {
+        dx = dirX(this.direction);
+        dy = dirY(this.direction);
+      }
+      this.roll = { dx, dy, frames: 14 };
+      this.rollCooldown = 34;
+      this.map.host.audio.playSe({ name: 'builtin:jump', volume: 60, pitch: 130 });
+    }
+    let speed = this.map.host.data.system.alwaysDash ? 0.11 : 0.09;
+    let tx = mv.x * speed;
+    let ty = mv.y * speed;
+    if (this.roll) {
+      speed = 0.2;
+      tx = this.roll.dx * speed;
+      ty = this.roll.dy * speed;
+      if (--this.roll.frames <= 0) this.roll = null;
+      this.vx = tx;
+      this.vy = ty;
+    } else {
+      this.vx += (tx - this.vx) * 0.35;
+      this.vy += (ty - this.vy) * 0.35;
+      if (Math.abs(this.vx) < 0.002) this.vx = 0;
+      if (Math.abs(this.vy) < 0.002) this.vy = 0;
+    }
+    this.bumped = null;
+    if (!this.tryMove(this.vx, 0)) this.vx = 0;
+    if (!this.tryMove(0, this.vy)) this.vy = 0;
+    const moving = Math.abs(this.vx) + Math.abs(this.vy) > 0.01;
+    this.freeMoving = moving;
+    if (this.aimDirection) this.setDirection(this.aimDirection);
+    else if (mv.x || mv.y) this.setDirection(Math.abs(mv.x) > Math.abs(mv.y) ? (mv.x > 0 ? 6 : 4) : mv.y > 0 ? 2 : 8);
+
+    if (moving) {
+      this.trail.unshift({ x: this.realX, y: this.realY, d: this.direction });
+      if (this.trail.length > 64) this.trail.length = 64;
+    }
+    this.followers.forEach((f, i) => {
+      const pt = this.trail[Math.min(this.trail.length - 1, (i + 1) * 14)] ?? { x: this.realX, y: this.realY, d: this.direction };
+      f.followTrail(pt, moving);
+    });
+
+    const nx = Math.round(this.realX);
+    const ny = Math.round(this.realY);
+    if (nx !== this.x || ny !== this.y) {
+      this.x = nx;
+      this.y = ny;
+      this.refreshBushDepth();
+      this.increaseSteps();
+      if (!combat) {
+        this.checkEventTriggerHere(['playerTouch', 'eventTouch']);
+        if (this.map.setupStartingEvent()) return;
+        if (this.updateEncounter()) return;
+      }
+    }
+    const bumped = this.bumped as { x: number; y: number } | null;
+    if (bumped && !combat && this.map.isValid(bumped.x, bumped.y)) this.checkEventTriggerTouch(bumped.x, bumped.y);
+    if (combat) return;
+    // interact with what we face
+    if (this.triggerAction()) return;
+    if (this.map.host.input.isTriggered('cancel') || this.map.host.input.isTriggered('menu')) {
+      if (this.map.host.state.menuEnabled) this.map.host.requestMenu();
+    }
+  }
+
+  /** Reset free-movement state (after transfers). */
+  resetFree(): void {
+    this.vx = this.vy = 0;
+    this.roll = null;
+    this.trail = [];
+  }
+
   override update(active = true): void {
+    if (this.freeMode() && !this.moveRouteForcing) {
+      if (active && this.canMove()) {
+        this.updateFree();
+        this.updateAnimation();
+        if (this.balloon && ++this.balloon.frame > 72) this.balloon = null;
+        return;
+      }
+      // events/messages: settle onto the tile grid and behave classically
+      this.freeMoving = null;
+      this.roll = null;
+      this.vx = this.vy = 0;
+    } else this.freeMoving = null;
     const wasMoving = this.isMoving();
     const input = this.map.host.input;
     this.debugThrough = false;

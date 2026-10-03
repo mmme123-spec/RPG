@@ -54,7 +54,7 @@ export function Playtest({ fromHere, onClose }: { fromHere?: { mapId: number; x:
       <div className="playtest">
         <div className="playtest-bar">
           <b>▶ Playtest</b>
-          <span className="hint">Arrows/WASD move · Z/Enter/Space OK · X/Esc cancel & menu · Shift dash · Ctrl walk through walls · F9 debug</span>
+          <span className="hint">WASD move · mouse aim · click attack · right-click skill · Shift roll · Space/Enter talk · Esc menu · Ctrl walk through walls · F9 debug</span>
           <span style={{ flex: 1 }} />
           <button onClick={() => setDebug((d) => !d)}>{debug ? 'Hide debug' : 'Debug'}</button>
           <button className="primary" onClick={onClose}>

@@ -85,6 +85,16 @@ export function SystemEditor() {
             <Field label="Window opacity">
               <input type="range" min={0} max={255} value={sys.windowOpacity} onChange={(e) => set((s) => (s.windowOpacity = Number(e.target.value)))} />
             </Field>
+            <Field label="Movement & combat">
+              <Select
+                value={sys.combatMode}
+                options={[
+                  ['action', 'Action — free movement, real-time shooter combat'],
+                  ['turn', 'Classic — tile movement, turn-based battles'],
+                ]}
+                onChange={(v) => set((s) => (s.combatMode = v))}
+              />
+            </Field>
             <Check label="Show party followers" value={sys.followers} onChange={(v) => set((s) => (s.followers = v))} />
             <Check label="Always dash" value={sys.alwaysDash} onChange={(v) => set((s) => (s.alwaysDash = v))} />
             <Field label="Attack command skill">

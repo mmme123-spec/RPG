@@ -2,6 +2,7 @@
 import { builtinTileId } from '../core/builtins';
 import { createCommand, createEvent } from '../core/factory';
 import { createEmptyProject } from '../core/project';
+import { createSampleProject } from '../core/sample';
 import type { EventCommand } from '../core/types';
 import { Game } from '../engine/game';
 
@@ -35,6 +36,8 @@ project.maps[0].encounters = [{ troopId: 2, weight: 1, regions: [] }];
 project.maps[0].encounterSteps = 9999;
 
 const params = new URLSearchParams(location.search);
-Game.create({ container: document.getElementById('game')!, project, isTest: true, skipTitle: params.has('skip') }).then((g) => {
+const sample = params.get('sample');
+const [sm, sx, sy] = (sample ?? '').split(',').map(Number);
+Game.create({ container: document.getElementById('game')!, project: sample ? createSampleProject() : project, isTest: true, skipTitle: params.has('skip'), startAt: sample ? { mapId: sm, x: sx, y: sy } : undefined }).then((g) => {
   (window as unknown as { game: Game }).game = g;
 });

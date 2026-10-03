@@ -32,6 +32,8 @@ const KEYMAP: Record<string, InputButtonName> = {
   F9: 'debug',
 };
 
+const ACTION_KEYS: Record<string, string> = { KeyJ: 'fire', KeyK: 'skill' };
+
 const BUTTONS: InputButtonName[] = ['up', 'down', 'left', 'right', 'ok', 'cancel', 'menu', 'shift', 'pageup', 'pagedown', 'debug'];
 
 export interface PointerState {
@@ -57,7 +59,16 @@ export class Input implements InputLike {
   ctrl = false;
   enabled = true;
   pointer: PointerState = { x: 0, y: 0, down: false, triggered: false, released: false, moved: false };
-  private pointerEvents: { type: 'down' | 'up' | 'move'; x: number; y: number }[] = [];
+  private pointerEvents: { type: 'down' | 'up' | 'move'; x: number; y: number; button: number }[] = [];
+  /** Action-combat controls: mouse buttons, J/K keys and gamepad triggers/right stick. */
+  private actionKeys = new Set<string>();
+  private actionLatched = new Set<string>();
+  private actionHeld = new Map<string, number>();
+  private mouseButtons = new Set<number>();
+  /** Right stick direction when it is tilted (gamepad aiming). */
+  padAim: { x: number; y: number } | null = null;
+  /** True once the mouse has moved over the game (mouse aiming available). */
+  mouseSeen = false;
   private target: HTMLElement | null = null;
   private pad: HTMLElement | null = null;
   private toGame: ((cx: number, cy: number) => { x: number; y: number }) | null = null;
@@ -65,6 +76,10 @@ export class Input implements InputLike {
   private onKeyDown = (e: KeyboardEvent): void => {
     if (!this.enabled) return;
     this.ctrl = e.ctrlKey;
+    if (ACTION_KEYS[e.code]) {
+      this.actionKeys.add(ACTION_KEYS[e.code]);
+      this.actionLatched.add(ACTION_KEYS[e.code]);
+    }
     const b = KEYMAP[e.code];
     if (!b) return;
     const t = e.target as HTMLElement | null;
@@ -81,6 +96,7 @@ export class Input implements InputLike {
 
   private onKeyUp = (e: KeyboardEvent): void => {
     this.ctrl = e.ctrlKey;
+    if (ACTION_KEYS[e.code]) this.actionKeys.delete(ACTION_KEYS[e.code]);
     const b = KEYMAP[e.code];
     if (!b) return;
     this.keyDown.delete(b);
@@ -90,26 +106,30 @@ export class Input implements InputLike {
   private onBlur = (): void => {
     this.keyDown.clear();
     this.touchDown.clear();
+    this.actionKeys.clear();
+    this.mouseButtons.clear();
     this.ctrl = false;
   };
 
   private onPointerDown = (e: PointerEvent): void => {
     if (!this.toGame) return;
     const p = this.toGame(e.clientX, e.clientY);
-    this.pointerEvents.push({ type: 'down', ...p });
+    this.pointerEvents.push({ type: 'down', ...p, button: e.button });
   };
 
   private onPointerMove = (e: PointerEvent): void => {
     if (!this.toGame) return;
     const p = this.toGame(e.clientX, e.clientY);
-    this.pointerEvents.push({ type: 'move', ...p });
+    this.pointerEvents.push({ type: 'move', ...p, button: e.button });
   };
 
   private onPointerUp = (e: PointerEvent): void => {
     if (!this.toGame) return;
     const p = this.toGame(e.clientX, e.clientY);
-    this.pointerEvents.push({ type: 'up', ...p });
+    this.pointerEvents.push({ type: 'up', ...p, button: e.button });
   };
+
+  private onContextMenu = (e: Event): void => e.preventDefault();
 
   attach(canvas: HTMLElement, toGame: (cx: number, cy: number) => { x: number; y: number }): void {
     this.target = canvas;
@@ -118,6 +138,7 @@ export class Input implements InputLike {
     window.addEventListener('keyup', this.onKeyUp, true);
     window.addEventListener('blur', this.onBlur);
     canvas.addEventListener('pointerdown', this.onPointerDown);
+    canvas.addEventListener('contextmenu', this.onContextMenu);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
   }
@@ -127,6 +148,7 @@ export class Input implements InputLike {
     window.removeEventListener('keyup', this.onKeyUp, true);
     window.removeEventListener('blur', this.onBlur);
     this.target?.removeEventListener('pointerdown', this.onPointerDown);
+    this.target?.removeEventListener('contextmenu', this.onContextMenu);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
     this.pad?.remove();
@@ -195,6 +217,7 @@ export class Input implements InputLike {
 
   private pollGamepads(): void {
     this.padDown.clear();
+    this.padAim = null;
     if (typeof navigator === 'undefined' || !navigator.getGamepads) return;
     for (const gp of navigator.getGamepads()) {
       if (!gp) continue;
@@ -209,6 +232,11 @@ export class Input implements InputLike {
       if (btn(13)) this.padDown.add('down');
       if (btn(14)) this.padDown.add('left');
       if (btn(15)) this.padDown.add('right');
+      if (btn(7)) this.padDown.add('fire' as InputButtonName);
+      if (btn(6)) this.padDown.add('skill' as InputButtonName);
+      const rx = gp.axes[2] ?? 0;
+      const ry = gp.axes[3] ?? 0;
+      if (Math.hypot(rx, ry) > 0.4) this.padAim = { x: rx, y: ry };
       const ax = gp.axes[0] ?? 0;
       const ay = gp.axes[1] ?? 0;
       if (ax < -0.5) this.padDown.add('left');
@@ -241,6 +269,23 @@ export class Input implements InputLike {
     p.triggered = false;
     p.released = false;
     p.moved = false;
+    const actionNow = new Set<string>([...this.actionKeys, ...this.actionLatched]);
+    for (const ev of this.pointerEvents) {
+      if (ev.type === 'down') {
+        this.mouseButtons.add(ev.button);
+        actionNow.add(ev.button === 2 ? 'skill' : 'fire');
+      } else if (ev.type === 'up') this.mouseButtons.delete(ev.button);
+      else this.mouseSeen = true;
+    }
+    if (this.mouseButtons.has(0)) actionNow.add('fire');
+    if (this.mouseButtons.has(2)) actionNow.add('skill');
+    if (this.padDown.has('fire' as InputButtonName)) actionNow.add('fire');
+    if (this.padDown.has('skill' as InputButtonName)) actionNow.add('skill');
+    for (const k of ['fire', 'skill']) {
+      if (actionNow.has(k) && this.enabled) this.actionHeld.set(k, (this.actionHeld.get(k) ?? 0) + 1);
+      else this.actionHeld.delete(k);
+    }
+    this.actionLatched.clear();
     for (const ev of this.pointerEvents) {
       p.x = ev.x;
       p.y = ev.y;
@@ -263,8 +308,29 @@ export class Input implements InputLike {
     this.touchDown.clear();
     this.latched.clear();
     this.held.clear();
+    this.actionKeys.clear();
+    this.actionHeld.clear();
+    this.mouseButtons.clear();
     this.latestDir = null;
     this.dirOrder = [];
+  }
+
+  /** Fire (left mouse / J / right trigger) held. */
+  isFiring(): boolean {
+    return (this.actionHeld.get('fire') ?? 0) > 0;
+  }
+
+  /** Skill (right mouse / K / left trigger) pressed this frame. */
+  isSkillTriggered(): boolean {
+    return this.actionHeld.get('skill') === 1;
+  }
+
+  /** Analog-style 8-way movement vector from the direction buttons (length 0 or 1). */
+  moveVector(): { x: number; y: number } {
+    const x = (this.isPressed('right') ? 1 : 0) - (this.isPressed('left') ? 1 : 0);
+    const y = (this.isPressed('down') ? 1 : 0) - (this.isPressed('up') ? 1 : 0);
+    const l = Math.hypot(x, y) || 1;
+    return { x: x / l, y: y / l };
   }
 
   isPressed(b: InputButtonName): boolean {

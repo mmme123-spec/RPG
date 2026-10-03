@@ -26,6 +26,7 @@ import { ShopScene } from './scenes/shop';
 import { MenuScene } from './scenes/menu';
 import { SaveScene } from './scenes/save';
 import { NameInputScene } from './scenes/nameinput';
+import { ActionCombat } from './action/combat';
 
 export interface GameOptions {
   container: HTMLElement;
@@ -54,6 +55,7 @@ export class Game implements EngineHost, UiContext {
   readonly screen = new ScreenState();
   readonly images: ImageLibrary;
   readonly map: MapRuntime;
+  readonly action: ActionCombat = new ActionCombat(this);
   readonly saves: SaveStore;
   readonly isTest: boolean;
   readonly width: number;
@@ -277,6 +279,7 @@ export class Game implements EngineHost, UiContext {
   // --- game flow ---------------------------------------------------------------------
 
   newGame(start?: { mapId: number; x: number; y: number }): void {
+    this.action.reset();
     const sys = this.data.system;
     this.state.setupNewGame();
     this.screen.clearAll();
@@ -327,6 +330,7 @@ export class Game implements EngineHost, UiContext {
   }
 
   loadFromSlot(slot: number): boolean {
+    this.action.reset();
     const file = this.saves.load(slot);
     if (!file) return false;
     const s = file.state;
@@ -360,8 +364,16 @@ export class Game implements EngineHost, UiContext {
 
   private sceneRequested = false;
 
+  combatActive(): boolean {
+    return this.action.active;
+  }
+
   requestBattle(troopId: number, canEscape: boolean, canLose: boolean, onEnd: (result: BattleResult) => void): void {
     if (!this.data.troops.has(troopId)) return;
+    if (this.data.system.combatMode === 'action' && this.mapScene() && !this.action.active) {
+      this.action.start(troopId, canEscape, canLose, onEnd);
+      return;
+    }
     this.sceneRequested = true;
     this.savedBgm = this.audio.currentBgm();
     this.savedBgs = this.audio.currentBgs();
