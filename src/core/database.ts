@@ -27,7 +27,7 @@ export const EL = { physical: 1, fire: 2, ice: 3, thunder: 4, water: 5, earth: 6
 // Skill type ids
 export const ST = { magic: 1, special: 2 } as const;
 // Weapon type ids
-export const WT = { sword: 1, axe: 2, dagger: 3, spear: 4, bow: 5, staff: 6, mace: 7 } as const;
+export const WT = { sword: 1, axe: 2, dagger: 3, spear: 4, bow: 5, staff: 6, mace: 7, gun: 8 } as const;
 // Armor type ids
 export const AT = { general: 1, light: 2, heavy: 3, robe: 4, smallShield: 5, largeShield: 6 } as const;
 // Equipment slots
@@ -524,7 +524,8 @@ function cls(id: number, name: string, p: [number, number][], learnings: [number
   c.params = p.map(([base, max]) => ({ base, max, growth: 1 }));
   c.learnings = learnings.map(([level, skillId]) => ({ level, skillId }));
   c.skillTypes = skillTypes;
-  c.weaponTypes = weaponTypes;
+  // every class can use guns
+  c.weaponTypes = weaponTypes.includes(WT.gun) ? weaponTypes : [...weaponTypes, WT.gun];
   c.armorTypes = armorTypes;
   c.traits = traits;
   return c;
@@ -645,7 +646,7 @@ export function defaultActors(): Actor[] {
     note: '',
   });
   return [
-    a(1, 'Leon', 1, 'hero', [1, 1, 0, 7, 0], 'A young swordsman from Willowbrook with a big heart and a bigger appetite.', 'The Brave'),
+    a(1, 'Leon', 1, 'hero', [13, 1, 0, 7, 0], 'A young swordsman from Willowbrook with a big heart and a bigger appetite.', 'The Brave'),
     a(2, 'Mira', 2, 'mage', [9, 0, 5, 9, 0], 'A wandering mage searching for the secrets of the ancient crystals.', 'Spellweaver'),
     a(3, 'Sera', 3, 'priest', [11, 1, 0, 9, 0], 'A gentle priestess of the Dawn Temple.', 'The Gentle'),
     a(4, 'Kit', 4, 'thief', [5, 0, 3, 7, 0], 'A quick-fingered rogue who insists he only steals from villains.', 'Shadowstep'),
@@ -775,6 +776,11 @@ export function defaultWeapons(): Weapon[] {
     weapon(9, 'Oak Staff', WT.staff, I.staff, 120, [0, 0, 5, 0, 10], 'blunt', 'Channels magic through living wood.'),
     weapon(10, 'Arcane Staff', WT.staff, I.staff, 1400, [0, 10, 10, 0, 28], 'blunt', 'Hums with arcane power.'),
     weapon(11, 'Mace', WT.mace, I.mace, 250, [0, 0, 14, 0, 5], 'blunt', 'A blessed iron mace.'),
+    weapon(13, 'Revolver', WT.gun, I.bow, 150, [0, 0, 12, 0, 0, 0, 2], 'hit', 'Six shots of trusty lead.'),
+    weapon(14, 'Shotgun', WT.gun, I.bow, 520, [0, 0, 20], 'hit', 'Sprays a fan of pellets. Best up close.'),
+    weapon(15, 'SMG', WT.gun, I.bow, 780, [0, 0, 16, 0, 0, 0, 4], 'hit', 'Hold the trigger and pray.'),
+    weapon(16, 'Assault Rifle', WT.gun, I.bow, 1200, [0, 0, 28], 'hit', 'Fast, accurate bursts.'),
+    weapon(17, 'Grenade Launcher', WT.gun, I.bomb, 1800, [0, 0, 36], 'fire', 'Explosive rounds hit everything nearby.'),
     weapon(12, 'Holy Mace', WT.mace, I.mace, 1600, [0, 0, 28, 0, 18], 'light', 'Shines with holy light.', [{ kind: 'attackElement', elementId: EL.light }]),
   ];
 }

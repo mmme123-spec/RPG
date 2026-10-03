@@ -16,13 +16,14 @@ import type { BattleResult } from '../host';
 import type { Game } from '../game';
 import type { Input } from '../input';
 import type { GameActor } from '../state/actor';
+import type { Follower } from '../map/player';
 import { GameEnemy } from '../state/enemy';
 import { drawText } from '../ui/text';
 
 const T = TILE_SIZE;
 const TAU = Math.PI * 2;
 
-type WeaponKind = 'melee' | 'spear' | 'knife' | 'bow' | 'staff' | 'fist';
+type WeaponKind = 'melee' | 'spear' | 'knife' | 'bow' | 'staff' | 'fist' | 'pistol' | 'shotgun' | 'smg' | 'rifle' | 'launcher';
 
 interface WeaponProfile {
   kind: WeaponKind;
@@ -33,27 +34,82 @@ interface WeaponProfile {
   spread: number;
   color: string;
   sound: string;
+  pitch: number;
+  pellets: number;
+  gun: boolean;
+  /** Burst fire: extra shots per trigger pull. */
+  burst?: number;
+  /** Explosion radius in tiles. */
+  explode?: number;
+  life?: number;
+  kick: number;
 }
 
+const W = (kind: WeaponKind, cooldown: number, power: number, speed: number, spread: number, color: string, sound: string, pitch: number, extra: Partial<WeaponProfile> = {}): WeaponProfile => ({
+  kind,
+  cooldown,
+  power,
+  speed,
+  spread,
+  color,
+  sound,
+  pitch,
+  pellets: 1,
+  gun: false,
+  kick: 1.2,
+  ...extra,
+});
+
 const WEAPONS: Record<WeaponKind, WeaponProfile> = {
-  melee: { kind: 'melee', cooldown: 22, power: 1.1, speed: 0, spread: 0, color: '#e8eef8', sound: 'slash' },
-  spear: { kind: 'spear', cooldown: 20, power: 1.0, speed: 0, spread: 0, color: '#e8eef8', sound: 'slash' },
-  fist: { kind: 'fist', cooldown: 16, power: 0.6, speed: 0, spread: 0, color: '#ffffff', sound: 'hit' },
-  knife: { kind: 'knife', cooldown: 8, power: 0.34, speed: 0.36, spread: 0.08, color: '#dfe6f0', sound: 'miss' },
-  bow: { kind: 'bow', cooldown: 19, power: 0.8, speed: 0.42, spread: 0.02, color: '#ffe08a', sound: 'miss' },
-  staff: { kind: 'staff', cooldown: 13, power: 0.5, speed: 0.24, spread: 0.06, color: '#9fd8ff', sound: 'magic' },
+  melee: W('melee', 22, 1.1, 0, 0, '#e8eef8', 'slash', 100, { kick: 2 }),
+  spear: W('spear', 20, 1.0, 0, 0, '#e8eef8', 'slash', 110, { kick: 2 }),
+  fist: W('fist', 16, 0.6, 0, 0, '#ffffff', 'hit', 100),
+  knife: W('knife', 8, 0.34, 0.36, 0.08, '#dfe6f0', 'miss', 120),
+  bow: W('bow', 19, 0.8, 0.42, 0.02, '#ffe08a', 'miss', 100),
+  staff: W('staff', 13, 0.5, 0.24, 0.06, '#9fd8ff', 'magic', 100),
+  pistol: W('pistol', 11, 0.55, 0.55, 0.04, '#ffe7a0', 'explosion', 230, { gun: true, kick: 2 }),
+  shotgun: W('shotgun', 32, 0.3, 0.46, 0.34, '#ffd27a', 'explosion', 150, { gun: true, pellets: 7, life: 26, kick: 5 }),
+  smg: W('smg', 5, 0.22, 0.52, 0.16, '#fff0b0', 'explosion', 260, { gun: true, kick: 1.2 }),
+  rifle: W('rifle', 18, 0.42, 0.65, 0.03, '#fff6c8', 'explosion', 210, { gun: true, burst: 3, kick: 2 }),
+  launcher: W('launcher', 44, 1.4, 0.3, 0.02, '#ff9f43', 'explosion', 120, { gun: true, explode: 1.6, kick: 6 }),
 };
 
-/** Weapon type ids of the default database: 1 sword, 2 axe, 3 dagger, 4 spear, 5 bow, 6 staff, 7 mace. */
+/** Weapon type ids of the default database: 1 sword, 2 axe, 3 dagger, 4 spear, 5 bow, 6 staff, 7 mace, 8 gun. */
 function weaponProfile(w: Weapon | undefined): WeaponProfile {
   if (!w) return WEAPONS.fist;
   const name = w.name.toLowerCase();
+  if (/launcher|grenade|rocket|bazooka/.test(name)) return WEAPONS.launcher;
+  if (/shotgun|blunderbuss/.test(name)) return WEAPONS.shotgun;
+  if (/smg|machine|uzi|minigun/.test(name)) return WEAPONS.smg;
+  if (/rifle|carbine/.test(name)) return WEAPONS.rifle;
+  if (w.wtypeId === 8 || /gun|pistol|revolver|musket/.test(name)) return WEAPONS.pistol;
   if (w.wtypeId === 3 || /dagger|knife/.test(name)) return WEAPONS.knife;
   if (w.wtypeId === 4 || /spear|lance/.test(name)) return WEAPONS.spear;
-  if (w.wtypeId === 5 || /bow|gun|sling/.test(name)) return WEAPONS.bow;
+  if (w.wtypeId === 5 || /bow|sling/.test(name)) return WEAPONS.bow;
   if (w.wtypeId === 6 || /staff|wand|rod/.test(name)) return WEAPONS.staff;
   return WEAPONS.melee;
 }
+
+/** A party member fighting alongside the player (AI controlled follower). */
+interface Ally {
+  f: Follower;
+  cd: number;
+  burstLeft: number;
+  invuln: number;
+  aim: number;
+  orbit: number;
+  skillCd: number;
+  strafe: number;
+}
+
+/** Something enemies can target. */
+interface Target {
+  x: number;
+  y: number;
+  ally: Ally | null;
+}
+
+type Pattern = 'aimed' | 'spiral' | 'flower' | 'wave' | 'ring';
 
 interface Bullet {
   x: number;
@@ -68,8 +124,9 @@ interface Bullet {
   pierce: number;
   hit: Set<ActEnemy>;
   elementId: number;
-  /** A skill's state effects travel with the bullet. */
   big?: boolean;
+  explode?: number;
+  streak?: boolean;
 }
 
 interface ActEnemy {
@@ -94,6 +151,7 @@ interface ActEnemy {
   strafe: number;
   contactCd: number;
   pattern: number;
+  burst: { kind: Pattern; t: number; n: number; angle: number; every: number } | null;
 }
 
 interface Particle {
@@ -208,8 +266,10 @@ export class ActionCombat {
     this.canLose = canLose;
     this.endTimer = 0;
     this.savedAudio = { bgm: g.audio.currentBgm(), bgs: g.audio.currentBgs() };
-    const members = troop.members.filter((m) => g.data.enemies.has(m.enemyId));
-    const boss = members.length === 1 && (g.data.enemies.get(members[0].enemyId)!.params[0] >= 1000 || members[0].enemyId >= 14);
+    const base = troop.members.filter((m) => g.data.enemies.has(m.enemyId));
+    const boss = base.length === 1 && (g.data.enemies.get(base[0].enemyId)!.params[0] >= 1000 || base[0].enemyId >= 14);
+    // bullet hell: ordinary troops come in larger packs
+    const members = boss ? base : [...base, ...base.filter(() => this.rng() < 0.75)];
     g.audio.playBgm(boss ? { name: 'builtin:boss', volume: 75, pitch: 100 } : g.data.system.battleBgm);
     g.sound('battleStart');
     g.screen.startFlash([255, 255, 255, 140], 10);
@@ -252,8 +312,10 @@ export class ActionCombat {
         strafe: this.rng() < 0.5 ? 1 : -1,
         contactCd: 0,
         pattern: 0,
+        burst: null,
       });
     });
+    this.initAllies();
     this.bossName = boss ? members.map((m) => g.data.enemies.get(m.enemyId)!.name)[0] : '';
     if (this.enemies.length === 0) this.finish('win');
   }
@@ -281,6 +343,7 @@ export class ActionCombat {
   private finish(result: BattleResult): void {
     const g = this.game;
     this.active = false;
+    this.releaseAllies();
     this.bullets = this.bullets.filter((b) => !b.enemy);
     this.player().aimDirection = 0;
     if (this.savedAudio) {
@@ -354,6 +417,13 @@ export class ActionCombat {
     if (this.hurtFlash > 0) this.hurtFlash--;
     if (playerFree) {
       if (this.input.isFiring() && this.fireCd === 0) this.fire();
+      else if (this.playerBurst > 0 && this.fireCd % 4 === 0 && this.fireCd > 0) {
+        const actor = this.fighter();
+        const pc = this.pc();
+        if (actor) this.attack(actor, pc.x, pc.y, this.aim, true);
+        this.playerBurst--;
+        this.recoil = 5;
+      }
       if (this.input.isSkillTriggered()) this.castSkill();
     }
     this.updateBullets();
@@ -361,6 +431,7 @@ export class ActionCombat {
     if (playerFree) {
       this.updateFlow();
       for (const e of this.enemies) this.updateEnemy(e);
+      for (const a of this.allies) this.updateAlly(a);
     }
     this.updatePickups();
     this.enemies = this.enemies.filter((e) => {
@@ -530,70 +601,278 @@ export class ActionCombat {
   private fire(): void {
     const actor = this.fighter();
     if (!actor) return;
-    const w = weaponProfile(actor.weapon());
-    this.fireCd = w.cooldown;
     const pc = this.pc();
+    const w = weaponProfile(actor.weapon());
+    this.fireCd = this.attack(actor, pc.x, pc.y, this.aim, true);
+    this.recoil = w.gun ? 6 : 4;
+    this.shake = Math.max(this.shake, w.kick);
+    if (w.burst) this.playerBurst = w.burst - 1;
+  }
+
+  private playerBurst = 0;
+
+  /**
+   * Attack with `actor`'s weapon from (x, y) toward `aim`; returns the cooldown in frames.
+   * Used by the player and by AI allies.
+   */
+  private attack(actor: GameActor, x: number, y: number, aim: number, byPlayer: boolean): number {
+    const w = weaponProfile(actor.weapon());
     const g = this.game;
-    g.audio.playSe(se(w.sound, 55, 90 + Math.floor(this.rng() * 30)));
-    this.recoil = 4;
+    g.audio.playSe(se(w.sound, byPlayer ? (w.gun ? 40 : 55) : 30, w.pitch + Math.floor(this.rng() * 30)));
     if (w.kind === 'melee' || w.kind === 'spear' || w.kind === 'fist') {
       const reach = w.kind === 'spear' ? 2.0 : w.kind === 'fist' ? 1.0 : 1.5;
       const arc = w.kind === 'spear' ? 0.5 : w.kind === 'fist' ? 0.9 : 1.9;
-      this.slashes.push({ x: pc.x, y: pc.y, angle: this.aim, reach, arc, life: 10 });
-      this.shake = Math.max(this.shake, 2);
-      // hit enemies in the arc
+      this.slashes.push({ x, y, angle: aim, reach, arc, life: 10 });
       for (const e of this.enemies) {
         if (e.spawn > 0) continue;
-        const dx = e.x - pc.x;
-        const dy = e.y - pc.y;
-        const d = Math.hypot(dx, dy) - e.r;
-        if (d > reach) continue;
-        const da = Math.abs(((Math.atan2(dy, dx) - this.aim + Math.PI * 3) % TAU) - Math.PI);
+        const dx = e.x - x;
+        const dy = e.y - y;
+        if (Math.hypot(dx, dy) - e.r > reach) continue;
+        const da = Math.abs(((Math.atan2(dy, dx) - aim + Math.PI * 3) % TAU) - Math.PI);
         if (da > arc / 2 + 0.2) continue;
-        this.damageEnemy(e, this.formulaDamage(this.attackSkill(), actor, e.battler, actor.attackElements()[0] ?? 0) * w.power, this.aim, 0.25);
+        this.damageEnemy(e, this.formulaDamage(this.attackSkill(), actor, e.battler, actor.attackElements()[0] ?? 0) * w.power, aim, 0.25);
       }
       // deflect enemy bullets (Nuclear Throne style)
       if (w.kind !== 'fist') {
         for (const b of this.bullets) {
           if (!b.enemy) continue;
-          const dx = b.x - pc.x;
-          const dy = b.y - pc.y;
+          const dx = b.x - x;
+          const dy = b.y - y;
           if (Math.hypot(dx, dy) > reach + 0.2) continue;
-          const da = Math.abs(((Math.atan2(dy, dx) - this.aim + Math.PI * 3) % TAU) - Math.PI);
+          const da = Math.abs(((Math.atan2(dy, dx) - aim + Math.PI * 3) % TAU) - Math.PI);
           if (da > arc / 2 + 0.3) continue;
           const sp = Math.hypot(b.vx, b.vy) * 1.3;
           b.enemy = false;
-          b.vx = Math.cos(this.aim) * sp;
-          b.vy = Math.sin(this.aim) * sp;
+          b.vx = Math.cos(aim) * sp;
+          b.vy = Math.sin(aim) * sp;
           b.color = '#ffe066';
           b.damage = this.formulaDamage(this.attackSkill(), actor, actor, 0) * 0.6;
           b.life = 90;
           this.burst(b.x, b.y, '#ffffff', 6, 0.08);
         }
       }
-      return;
+      return w.cooldown;
     }
-    const count = 1;
-    for (let i = 0; i < count; i++) {
-      const a = this.aim + (this.rng() - 0.5) * w.spread * 2;
-      const dmg = this.formulaDamage(this.attackSkill(), actor, actor, 0) * w.power;
+    const dmg = this.formulaDamage(this.attackSkill(), actor, actor, 0) * w.power;
+    for (let i = 0; i < w.pellets; i++) {
+      const a = aim + (this.rng() - 0.5) * w.spread * 2;
+      const sp = w.speed * (w.pellets > 1 ? 0.75 + this.rng() * 0.5 : 1);
       this.bullets.push({
-        x: pc.x + Math.cos(a) * 0.5,
-        y: pc.y + Math.sin(a) * 0.5,
-        vx: Math.cos(a) * w.speed,
-        vy: Math.sin(a) * w.speed,
-        r: w.kind === 'staff' ? 0.16 : 0.1,
-        damage: dmg,
+        x: x + Math.cos(a) * 0.55,
+        y: y + Math.sin(a) * 0.55,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        r: w.kind === 'staff' ? 0.16 : w.kind === 'launcher' ? 0.18 : 0.1,
+        damage: dmg * (0.9 + this.rng() * 0.2),
         enemy: false,
-        life: 70,
+        life: w.life ?? 70,
         color: w.color,
         pierce: w.kind === 'bow' ? 1 : 0,
         hit: new Set(),
         elementId: actor.attackElements()[0] ?? 0,
+        explode: w.explode,
+        streak: w.gun,
       });
     }
-    this.burst(pc.x + Math.cos(this.aim) * 0.6, pc.y + Math.sin(this.aim) * 0.6, w.color, 3, 0.06);
-    this.shake = Math.max(this.shake, 1.2);
+    const mx = x + Math.cos(aim) * 0.7;
+    const my = y + Math.sin(aim) * 0.7;
+    if (w.gun) {
+      this.flashes.push({ x: mx, y: my, life: 3, big: w.pellets > 1 || !!w.explode });
+      // eject a shell casing
+      const ca = aim + Math.PI / 2 + (this.rng() - 0.5);
+      this.particles.push({ x, y, vx: Math.cos(ca) * 0.05, vy: Math.sin(ca) * 0.05 - 0.02, life: 26, max: 26, color: '#e8c050', size: 2 });
+    } else this.burst(mx, my, w.color, 3, 0.06);
+    return w.cooldown;
+  }
+
+  private flashes: { x: number; y: number; life: number; big: boolean }[] = [];
+
+  // --- allies (AI party members) --------------------------------------------------------
+
+  private allies: Ally[] = [];
+
+  private initAllies(): void {
+    this.allies = [];
+    const p = this.player();
+    p.followers.forEach((f, i) => {
+      const a = f.actor();
+      if (!a || !f.isVisible() || a.isDead()) return;
+      f.combatControlled = true;
+      f.freeMoving = false;
+      // start next to the player if the follower lagged behind
+      if (Math.hypot(f.realX - p.realX, f.realY - p.realY) > 3) {
+        f.realX = p.realX;
+        f.realY = p.realY;
+      }
+      this.allies.push({ f, cd: 20 + i * 7, burstLeft: 0, invuln: 0, aim: 0, orbit: Math.PI * 0.5 + (i - 1) * 1.6, skillCd: 120 + i * 40, strafe: i % 2 ? 1 : -1 });
+    });
+  }
+
+  private releaseAllies(): void {
+    for (const a of this.allies) a.f.combatControlled = false;
+    for (const f of this.player().followers) f.combatControlled = false;
+    this.allies = [];
+  }
+
+  private allyCenter(a: Ally): { x: number; y: number } {
+    return { x: a.f.realX + 0.5, y: a.f.realY + 0.45 };
+  }
+
+  private livingAllies(): Ally[] {
+    return this.allies.filter((a) => {
+      const act = a.f.actor();
+      return !!act && act.isAlive() && act !== this.fighter();
+    });
+  }
+
+  private updateAlly(a: Ally): void {
+    const actor = a.f.actor();
+    if (!actor || actor.isDead() || actor === this.fighter()) return;
+    if (a.cd > 0) a.cd--;
+    if (a.invuln > 0) a.invuln--;
+    if (a.skillCd > 0) a.skillCd--;
+    const c = this.allyCenter(a);
+    const pc = this.pc();
+    const w = weaponProfile(actor.weapon());
+    const melee = w.kind === 'melee' || w.kind === 'spear' || w.kind === 'fist';
+    const target = this.nearestEnemy(c.x, c.y, 12);
+    let gx: number;
+    let gy: number;
+    if (target && melee && Math.hypot(target.x - pc.x, target.y - pc.y) < 7) {
+      gx = target.x - Math.cos(Math.atan2(target.y - c.y, target.x - c.x)) * (target.r + 0.6);
+      gy = target.y - Math.sin(Math.atan2(target.y - c.y, target.x - c.x)) * (target.r + 0.6);
+    } else if (target) {
+      // keep a firing distance, circling the target, without straying from the player
+      const ang = Math.atan2(c.y - target.y, c.x - target.x) + a.strafe * 0.25;
+      gx = target.x + Math.cos(ang) * 4.5;
+      gy = target.y + Math.sin(ang) * 4.5;
+      if (Math.hypot(gx - pc.x, gy - pc.y) > 5) {
+        gx = pc.x + Math.cos(a.orbit) * 1.8;
+        gy = pc.y + Math.sin(a.orbit) * 1.8;
+      }
+      if (this.rng() < 0.006) a.strafe *= -1;
+    } else {
+      gx = pc.x + Math.cos(a.orbit) * 1.6;
+      gy = pc.y + Math.sin(a.orbit) * 1.6;
+    }
+    let vx = gx - c.x;
+    let vy = gy - c.y;
+    const gd = Math.hypot(vx, vy);
+    vx = gd > 0.2 ? vx / gd : 0;
+    vy = gd > 0.2 ? vy / gd : 0;
+    // dodge incoming enemy bullets
+    for (const b of this.bullets) {
+      if (!b.enemy) continue;
+      const dx = c.x - b.x;
+      const dy = c.y - b.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 1.6 || d === 0) continue;
+      const approaching = dx * b.vx + dy * b.vy > 0;
+      if (!approaching) continue;
+      const bl = Math.hypot(b.vx, b.vy) || 1;
+      // sidestep perpendicular to the bullet
+      const side = (b.vx * dy - b.vy * dx) > 0 ? 1 : -1;
+      vx += (-b.vy / bl) * side * 1.6 * (1.6 - d);
+      vy += (b.vx / bl) * side * 1.6 * (1.6 - d);
+    }
+    const l = Math.hypot(vx, vy);
+    const speed = 0.085;
+    let nx = c.x;
+    let ny = c.y;
+    if (l > 0.05) {
+      const sx = (vx / Math.max(1, l)) * speed;
+      const sy = (vy / Math.max(1, l)) * speed;
+      if (this.circleFree(c.x + sx, c.y, 0.3)) nx += sx;
+      if (this.circleFree(nx, c.y + sy, 0.3)) ny += sy;
+    }
+    // teleport back if hopelessly stuck far away
+    if (Math.hypot(nx - pc.x, ny - pc.y) > 12) {
+      nx = pc.x;
+      ny = pc.y;
+    }
+    const moved = Math.hypot(nx - c.x, ny - c.y) > 0.01;
+    a.f.realX = nx - 0.5;
+    a.f.realY = ny - 0.45;
+    a.f.x = Math.round(a.f.realX);
+    a.f.y = Math.round(a.f.realY);
+    a.f.freeMoving = moved;
+    // aim and shoot
+    if (target) {
+      a.aim = Math.atan2(target.y - ny, target.x - nx);
+      const dist = Math.hypot(target.x - nx, target.y - ny);
+      const inRange = melee ? dist - target.r < (w.kind === 'spear' ? 2 : 1.4) : dist < 10;
+      if (a.cd === 0 && inRange && this.lineOfSight(nx, ny, target.x, target.y)) {
+        a.cd = Math.round(this.attack(actor, nx, ny, a.aim + (this.rng() - 0.5) * 0.12, false) * 1.25);
+        if (w.burst) a.burstLeft = w.burst - 1;
+      } else if (a.burstLeft > 0 && a.cd < (w.cooldown * 1.25) - 4 * (w.burst! - a.burstLeft)) {
+        a.burstLeft--;
+        this.attack(actor, nx, ny, a.aim, false);
+      }
+      if (a.skillCd === 0 && dist < 9) {
+        this.allyCastSkill(a, actor, nx, ny);
+        a.skillCd = 240 + Math.floor(this.rng() * 120);
+      }
+    } else if (moved) a.aim = Math.atan2(vy, vx);
+    const ca = Math.cos(a.aim);
+    const sa = Math.sin(a.aim);
+    a.f.direction = Math.abs(ca) > Math.abs(sa) ? (ca > 0 ? 6 : 4) : sa > 0 ? 2 : 8;
+    a.f.animate();
+  }
+
+  private allyCastSkill(a: Ally, actor: GameActor, x: number, y: number): void {
+    const usable = actor.allSkills().filter((s) => s.stypeId > 0 && (s.occasion === 'always' || s.occasion === 'battle') && actor.canPaySkillCost(s));
+    const party = this.game.state.aliveMembers();
+    const hurt = party.some((m) => m.hpRate() < 0.5);
+    const heal = usable.find((s) => s.damage.type === 'hpRecover');
+    const atk = usable.find((s) => s.damage.type === 'hpDamage' && s.scope !== 'user');
+    const skill = heal && hurt ? heal : atk;
+    if (!skill) return;
+    actor.gainMp(-skill.mpCost);
+    this.popups.push({ x, y: y - 1.1, text: skill.name, color: '#c9e8ff', life: 50, big: false });
+    if (skill.damage.type === 'hpRecover') {
+      const v = Math.round(this.formulaDamage(skill, actor, actor));
+      for (const m of party) m.gainHp(v);
+      const pc = this.pc();
+      this.popups.push({ x: pc.x, y: pc.y - 0.5, text: `+${v}`, color: '#7dff9a', life: 60, big: true });
+      this.burst(pc.x, pc.y, '#7dff9a', 16, 0.08);
+      this.game.audio.playSe(se('heal', 60));
+      return;
+    }
+    this.skillVolley(actor, skill, x, y, a.aim);
+  }
+
+  private hurtAlly(a: Ally, raw: number, angle: number): void {
+    const actor = a.f.actor();
+    if (!actor || actor.isDead() || a.invuln > 0) return;
+    const v = Math.max(1, Math.round(raw));
+    actor.gainHp(-v);
+    a.invuln = 40;
+    const c = this.allyCenter(a);
+    this.popups.push({ x: c.x, y: c.y - 1, text: String(v), color: '#ffa0a0', life: 40, big: false });
+    this.burst(c.x, c.y, '#ff3030', 6, 0.08);
+    a.f.realX += Math.cos(angle) * 0.15;
+    a.f.realY += Math.sin(angle) * 0.15;
+    if (actor.isDead()) {
+      this.game.audio.playSe(se('collapse', 70));
+      this.burst(c.x, c.y, '#ffffff', 14, 0.12);
+      this.popups.push({ x: c.x, y: c.y - 1.4, text: `${actor.name} is down!`, color: '#ffb0b0', life: 100, big: false });
+    }
+  }
+
+  /** Who the enemy goes after: the nearest living combatant. */
+  private enemyTarget(e: ActEnemy): Target {
+    const pc = this.pc();
+    let best: Target = { x: pc.x, y: pc.y, ally: null };
+    let bd = Math.hypot(pc.x - e.x, pc.y - e.y);
+    for (const a of this.livingAllies()) {
+      const c = this.allyCenter(a);
+      const d = Math.hypot(c.x - e.x, c.y - e.y) * 1.25; // the player is the preferred target
+      if (d < bd) {
+        bd = d;
+        best = { x: c.x, y: c.y, ally: a };
+      }
+    }
+    return best;
   }
 
   private castSkill(): void {
@@ -620,14 +899,19 @@ export class ActionCombat {
       this.burst(pc.x, pc.y, '#7dff9a', 20, 0.08);
       return;
     }
+    this.skillVolley(actor, skill, pc.x, pc.y, this.aim);
+    this.shake = Math.max(this.shake, 5);
+  }
+
+  private skillVolley(actor: GameActor, skill: Skill, x: number, y: number, aim: number): void {
     const color = skill.damage.elementId === 2 ? '#ff8a3d' : skill.damage.elementId === 3 ? '#8fe3ff' : skill.damage.elementId === 4 ? '#fff36b' : '#d59bff';
     const all = skill.scope === 'allEnemies';
     const n = all ? 14 : 3;
     for (let i = 0; i < n; i++) {
-      const a = all ? (i / n) * TAU : this.aim + (i - 1) * 0.18;
+      const a = all ? (i / n) * TAU : aim + (i - 1) * 0.18;
       this.bullets.push({
-        x: pc.x,
-        y: pc.y,
+        x,
+        y,
         vx: Math.cos(a) * 0.26,
         vy: Math.sin(a) * 0.26,
         r: 0.24,
@@ -641,8 +925,7 @@ export class ActionCombat {
         big: true,
       });
     }
-    this.shake = Math.max(this.shake, 5);
-    this.burst(pc.x, pc.y, color, 16, 0.1);
+    this.burst(x, y, color, 16, 0.1);
   }
 
   private damageEnemy(e: ActEnemy, raw: number, angle: number, knock: number, elementId = 0): void {
@@ -675,6 +958,12 @@ export class ActionCombat {
     const img = g.images.enemy(e.data.battler, e.data.hue);
     this.corpses.push({ img, x: e.x, y: e.y, scale: this.spriteScale(e, img), flip: e.facing < 0, life: 900 });
     if (this.corpses.length > 40) this.corpses.shift();
+    // some enemies burst into a ring of bullets when they die
+    if (e.kind !== 'boss' && this.rng() < 0.35) {
+      const n = 8;
+      const off = this.rng() * TAU;
+      for (let i = 0; i < n; i++) this.enemyShoot(e, off + (i / n) * TAU, 1, 0.08, this.attackSkill(), 0.14, 0, '#ff7a3d');
+    }
     const roll = this.rng();
     if (roll < 0.22) this.pickups.push({ x: e.x, y: e.y, kind: 'hp', life: 600 });
     else if (roll < 0.34) this.pickups.push({ x: e.x, y: e.y, kind: 'mp', life: 600 });
@@ -707,7 +996,9 @@ export class ActionCombat {
     }
     if (e.flash > 0) e.flash--;
     if (e.contactCd > 0) e.contactCd--;
-    const pc = this.pc();
+    const tgt = this.enemyTarget(e);
+    const pc = tgt;
+    this.runBurst(e, tgt);
     const dx = pc.x - e.x;
     const dy = pc.y - e.y;
     const dist = Math.hypot(dx, dy) || 0.001;
@@ -731,6 +1022,10 @@ export class ActionCombat {
           if (dist < 2.6 && e.cooldown <= 0) {
             e.phase = 'windup';
             e.phaseT = 22;
+          } else if (dist > 4 && e.cooldown <= -40 && !e.burst) {
+            // bullet hell: even brawlers lob a few slow shots
+            this.startBurst(e, this.rng() < 0.5 ? 'aimed' : 'wave', 3);
+            e.cooldown = 40 + Math.floor(this.rng() * 60);
           }
         } else {
           const pd = dist < 20 ? this.pathDir(e) : null;
@@ -761,11 +1056,13 @@ export class ActionCombat {
         mx = (ux * toward + -uy * e.strafe * 0.7) * e.speed;
         my = (uy * toward + ux * e.strafe * 0.7) * e.speed;
         if (this.rng() < 0.008) e.strafe *= -1;
-        if (e.cooldown <= 0) {
-          const skill = this.pickSkill(e);
-          const spread = e.data.params[4] > 30 ? 3 : 1;
-          this.enemyShoot(e, Math.atan2(dy, dx), spread, 0.2, skill, 0.16);
-          e.cooldown = 80 + Math.floor(this.rng() * 50);
+        if (e.cooldown <= 0 && !e.burst) {
+          const r = this.rng();
+          if (r < 0.35) this.startBurst(e, 'aimed', 5);
+          else if (r < 0.6) this.startBurst(e, 'wave', 3);
+          else if (r < 0.8) this.startBurst(e, 'spiral', 18);
+          else this.startBurst(e, 'ring', 2);
+          e.cooldown = 70 + Math.floor(this.rng() * 50);
         }
       } else if (dist < 20) {
         const pd = this.pathDir(e);
@@ -791,20 +1088,19 @@ export class ActionCombat {
           e.lungeX = ux * 0.2;
           e.lungeY = uy * 0.2;
         }
-      } else if (e.cooldown <= 0) {
-        const skill = this.pickSkill(e);
-        const p = e.pattern++ % 3;
-        if (p === 0) this.enemyShoot(e, Math.atan2(dy, dx), enraged ? 7 : 5, 0.16, skill, 0.18, 0.22);
-        else if (p === 1) {
-          const n = enraged ? 20 : 14;
-          const off = this.rng() * TAU;
-          for (let i = 0; i < n; i++) this.enemyShoot(e, off + (i / n) * TAU, 1, 0.12, skill, 0.2);
-          this.shake = Math.max(this.shake, 4);
-        } else {
+      } else if (e.cooldown <= 0 && !e.burst) {
+        const p = e.pattern++ % 5;
+        if (p === 0) this.startBurst(e, 'wave', enraged ? 6 : 4);
+        else if (p === 1) this.startBurst(e, 'flower', enraged ? 6 : 4);
+        else if (p === 2) this.startBurst(e, 'spiral', enraged ? 60 : 40);
+        else if (p === 3) this.startBurst(e, 'aimed', enraged ? 12 : 8);
+        else {
           e.phase = 'windup';
           e.phaseT = 30;
+          this.startBurst(e, 'ring', 2);
         }
-        e.cooldown = enraged ? 55 : 80;
+        this.shake = Math.max(this.shake, 3);
+        e.cooldown = enraged ? 40 : 65;
       }
     }
 
@@ -824,12 +1120,59 @@ export class ActionCombat {
     // contact damage
     if (dist < e.r + 0.3 && e.contactCd === 0) {
       const skill = e.phase === 'lunge' ? this.pickSkill(e) : this.attackSkill();
-      this.hurtPlayer(e, skill, e.phase === 'lunge' ? 0.7 : 0.4, Math.atan2(dy, dx));
+      const factor = e.phase === 'lunge' ? 0.6 : 0.35;
+      if (tgt.ally) {
+        const act = tgt.ally.f.actor();
+        if (act) this.hurtAlly(tgt.ally, this.formulaDamage(skill, e.battler, act) * factor, Math.atan2(dy, dx));
+      } else this.hurtPlayer(e, skill, factor, Math.atan2(dy, dx));
       e.contactCd = 40;
     }
   }
 
-  private enemyShoot(e: ActEnemy, angle: number, count: number, speed: number, skill: Skill | undefined, r: number, gap = 0.2): void {
+  private startBurst(e: ActEnemy, kind: Pattern, n: number): void {
+    const every = kind === 'spiral' ? 3 : kind === 'aimed' ? 7 : kind === 'flower' ? 16 : kind === 'ring' ? 20 : 12;
+    e.burst = { kind, t: 0, n, angle: this.rng() * TAU, every };
+  }
+
+  /** Advance an enemy's bullet pattern. */
+  private runBurst(e: ActEnemy, tgt: Target): void {
+    const b = e.burst;
+    if (!b) return;
+    if (b.t++ % b.every !== 0) return;
+    const skill = this.pickSkill(e);
+    const toward = Math.atan2(tgt.y - e.y, tgt.x - e.x);
+    const boss = e.kind === 'boss';
+    const sp = boss ? 0.12 : 0.1;
+    switch (b.kind) {
+      case 'aimed':
+        this.enemyShoot(e, toward + (this.rng() - 0.5) * 0.1, 1, sp * 1.4, skill, 0.15);
+        break;
+      case 'wave':
+        this.enemyShoot(e, toward, boss ? 7 : 5, sp, skill, 0.16, 0.22);
+        break;
+      case 'spiral': {
+        const arms = boss ? 3 : 2;
+        for (let i = 0; i < arms; i++) this.enemyShoot(e, b.angle + (i / arms) * TAU, 1, sp * 0.9, skill, 0.14, 0, '#ffa23d');
+        b.angle += 0.32;
+        break;
+      }
+      case 'flower': {
+        const n = 18;
+        const off = (b.n % 2) * (Math.PI / n);
+        for (let i = 0; i < n; i++) this.enemyShoot(e, off + (i / n) * TAU, 1, sp * 0.85, skill, 0.17, 0, b.n % 2 ? '#7d6bff' : '#ff3df0');
+        break;
+      }
+      case 'ring': {
+        const n = boss ? 24 : 10;
+        for (let i = 0; i < n; i++) this.enemyShoot(e, b.angle + (i / n) * TAU, 1, sp * 0.8, skill, 0.16, 0, '#ff5050');
+        b.angle += 0.15;
+        break;
+      }
+    }
+    if (--b.n <= 0) e.burst = null;
+  }
+
+  private enemyShoot(e: ActEnemy, angle: number, count: number, speed: number, skill: Skill | undefined, r: number, gap = 0.2, color = '#ff3df0'): void {
     const target = this.fighter();
     if (!target) return;
     for (let i = 0; i < count; i++) {
@@ -840,17 +1183,22 @@ export class ActionCombat {
         vx: Math.cos(a) * speed,
         vy: Math.sin(a) * speed,
         r,
-        damage: this.formulaDamage(skill, e.battler, target, skill?.damage.elementId ?? 0) * 0.45,
+        damage: this.formulaDamage(skill, e.battler, target, skill?.damage.elementId ?? 0) * 0.28,
         enemy: true,
-        life: 160,
-        color: '#ff3df0',
+        life: 240,
+        color,
         pierce: 0,
         hit: new Set(),
         elementId: 0,
       });
     }
-    this.game.audio.playSe(se('magic', 45, 70));
+    if (this.game.frameCount() - this.lastShotSound > 5) {
+      this.lastShotSound = this.game.frameCount();
+      this.game.audio.playSe(se('magic', 30, 70 + Math.floor(this.rng() * 30)));
+    }
   }
+
+  private lastShotSound = 0;
 
   private hurtPlayer(e: ActEnemy | null, skill: Skill | undefined, factor: number, angle: number, preset?: number): void {
     const p = this.player();
@@ -909,21 +1257,31 @@ export class ActionCombat {
       for (let s = 0; s < steps && b.life > 0; s++) {
         b.x += b.vx / steps;
         b.y += b.vy / steps;
-        if (this.solidAt(b.x, b.y)) {
-          b.life = 0;
-          this.burst(b.x - b.vx / steps, b.y - b.vy / steps, b.color, 4, 0.05);
-          break;
-        }
         if (b.enemy) {
-          if (Math.hypot(b.x - pc.x, b.y - pc.y) < b.r + 0.24 && this.invuln === 0 && !this.player().isRolling()) {
+          // small "bullet hell" hitbox in the middle of the body
+          if (Math.hypot(b.x - pc.x, b.y - pc.y) < b.r + 0.12 && this.invuln === 0 && !this.player().isRolling()) {
             this.hurtPlayer(null, undefined, 1, Math.atan2(b.vy, b.vx), b.damage);
             b.life = 0;
+            break;
+          }
+          for (const a of this.livingAllies()) {
+            const c = this.allyCenter(a);
+            if (Math.hypot(b.x - c.x, b.y - c.y) < b.r + 0.14) {
+              this.hurtAlly(a, b.damage, Math.atan2(b.vy, b.vx));
+              b.life = 0;
+              break;
+            }
           }
         } else {
           for (const e of this.enemies) {
             if (e.spawn > 0 || b.hit.has(e) || e.battler.hp <= 0) continue;
             if (Math.hypot(b.x - e.x, b.y - e.y) < b.r + e.r) {
               b.hit.add(e);
+              if (b.explode) {
+                this.explode(b.x, b.y, b);
+                b.life = 0;
+                break;
+              }
               this.damageEnemy(e, b.damage, Math.atan2(b.vy, b.vx), b.big ? 0.2 : 0.12, b.elementId);
               if (b.pierce-- <= 0) {
                 b.life = 0;
@@ -932,11 +1290,38 @@ export class ActionCombat {
             }
           }
         }
+        // walls stop bullets (checked after hits so big enemies hugging walls can still be shot)
+        if (b.life > 0 && this.solidAt(b.x, b.y)) {
+          b.life = 0;
+          this.burst(b.x - b.vx / steps, b.y - b.vy / steps, b.color, 4, 0.05);
+          if (b.explode) this.explode(b.x - b.vx / steps, b.y - b.vy / steps, b);
+          break;
+        }
       }
       b.life--;
     }
     this.bullets = this.bullets.filter((b) => b.life > 0);
   }
+
+  private explode(x: number, y: number, b: Bullet): void {
+    const r = b.explode ?? 1.5;
+    this.game.audio.playSe(se('explosion', 80, 90));
+    this.shake = Math.max(this.shake, 9);
+    this.hitstop = Math.max(this.hitstop, 3);
+    this.burst(x, y, '#ffb347', 30, 0.16);
+    this.burst(x, y, '#ffffff', 10, 0.1);
+    this.flashes.push({ x, y, life: 6, big: true });
+    this.booms.push({ x, y, r, life: 14 });
+    for (const e of this.enemies) {
+      if (e.spawn > 0) continue;
+      const d = Math.hypot(e.x - x, e.y - y) - e.r;
+      if (d < r) this.damageEnemy(e, b.damage * (1 - Math.max(0, d) / r * 0.5), Math.atan2(e.y - y, e.x - x), 0.35, b.elementId);
+    }
+    // explosions also cancel nearby enemy bullets
+    for (const o of this.bullets) if (o.enemy && Math.hypot(o.x - x, o.y - y) < r) o.life = 0;
+  }
+
+  private booms: { x: number; y: number; r: number; life: number }[] = [];
 
   private updatePickups(): void {
     const pc = this.pc();
@@ -989,6 +1374,10 @@ export class ActionCombat {
       p.life--;
     }
     this.popups = this.popups.filter((p) => p.life > 0);
+    for (const f of this.flashes) f.life--;
+    this.flashes = this.flashes.filter((f) => f.life > 0);
+    for (const b of this.booms) b.life--;
+    this.booms = this.booms.filter((b) => b.life > 0);
     for (const s of this.slashes) s.life--;
     this.slashes = this.slashes.filter((s) => s.life > 0);
     for (const c of this.corpses) c.life--;
@@ -1004,6 +1393,7 @@ export class ActionCombat {
 
   /** Forget everything (new map, new game). */
   reset(): void {
+    this.releaseAllies();
     this.active = false;
     this.onEnd = null;
     this.enemies = [];
@@ -1067,7 +1457,31 @@ export class ActionCombat {
     }
     for (const e of this.enemies) this.drawEnemy(ctx, e, sx(e.x), sy(e.y));
     // the player's weapon
-    if (g.map.player.freeMode() && (this.active || this.input.mouseSeen || this.input.isFiring())) this.drawWeapon(ctx, sx, sy);
+    if (g.map.player.freeMode() && (this.active || this.input.mouseSeen || this.input.isFiring())) {
+      const actor = this.fighter();
+      const pc = this.pc();
+      if (actor && !g.map.player.transparent) this.drawWeapon(ctx, actor, sx(pc.x), sy(pc.y) + 4, this.aim, this.recoil);
+    }
+    for (const a of this.livingAllies()) {
+      const actor = a.f.actor()!;
+      const c = this.allyCenter(a);
+      this.drawWeapon(ctx, actor, sx(c.x), sy(c.y) + 4, a.aim, 0);
+      if (actor.hpRate() < 1) {
+        ctx.fillStyle = '#000a';
+        ctx.fillRect(sx(c.x) - 13, sy(c.y) - 34, 26, 4);
+        ctx.fillStyle = '#5adf6a';
+        ctx.fillRect(sx(c.x) - 12, sy(c.y) - 33, 24 * actor.hpRate(), 2);
+      }
+    }
+    for (const b of this.booms) {
+      ctx.save();
+      ctx.globalAlpha = b.life / 14;
+      ctx.fillStyle = '#ffcf6b';
+      ctx.beginPath();
+      ctx.arc(sx(b.x), sy(b.y), b.r * T * (1 - b.life / 20), 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
     for (const s of this.slashes) {
       ctx.save();
       ctx.globalAlpha = s.life / 10;
@@ -1092,7 +1506,20 @@ export class ActionCombat {
       ctx.beginPath();
       ctx.arc(x, y, r, 0, TAU);
       ctx.fill();
-      if (!b.enemy && !b.big) {
+      if (b.enemy) {
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(x, y, r * 0.45, 0, TAU);
+        ctx.fill();
+      }
+      if (b.streak) {
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - b.vx * T * 0.9, y - b.vy * T * 0.9);
+        ctx.stroke();
+      } else if (!b.enemy && !b.big) {
         ctx.strokeStyle = b.color;
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -1101,6 +1528,13 @@ export class ActionCombat {
         ctx.stroke();
       }
     }
+    for (const f of this.flashes) {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#fff6c0';
+      ctx.beginPath();
+      ctx.arc(sx(f.x), sy(f.y), (f.big ? 12 : 7) * (f.life / 3 + 0.4), 0, TAU);
+      ctx.fill();
+    }
     for (const p of this.particles) {
       ctx.globalAlpha = p.life / p.max;
       ctx.fillStyle = p.color;
@@ -1108,6 +1542,18 @@ export class ActionCombat {
     }
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
+    if (this.active) {
+      const pc = this.pc();
+      if (this.bullets.some((b) => b.enemy && Math.hypot(b.x - pc.x, b.y - pc.y) < 3)) {
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#ff2040';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx(pc.x), sy(pc.y), 4, 0, TAU);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
     for (const p of this.popups) {
       ctx.globalAlpha = Math.min(1, p.life / 15);
       drawText(ctx, p.text, sx(p.x), sy(p.y), { size: p.big ? 22 : 16, align: 'center', bold: true, color: p.color });
@@ -1118,7 +1564,7 @@ export class ActionCombat {
   private drawEnemy(ctx: CanvasRenderingContext2D, e: ActEnemy, x: number, y: number): void {
     const g = this.game;
     if (e.spawn > 0) {
-      const t = e.spawn / 36;
+      const t = Math.min(1, e.spawn / 36);
       ctx.save();
       ctx.strokeStyle = '#c86bff';
       ctx.lineWidth = 3;
@@ -1156,18 +1602,13 @@ export class ActionCombat {
     }
   }
 
-  private drawWeapon(ctx: CanvasRenderingContext2D, sx: (x: number) => number, sy: (y: number) => number): void {
-    const actor = this.fighter();
-    if (!actor || this.game.map.player.transparent) return;
+  private drawWeapon(ctx: CanvasRenderingContext2D, actor: GameActor, x: number, y: number, aim: number, recoil: number): void {
     const w = weaponProfile(actor.weapon());
-    const pc = this.pc();
-    const x = sx(pc.x);
-    const y = sy(pc.y) + 4;
     ctx.save();
     ctx.translate(x, y);
-    ctx.rotate(this.aim);
-    ctx.translate(10 - this.recoil, 0);
-    if (Math.cos(this.aim) < 0) ctx.scale(1, -1);
+    ctx.rotate(aim);
+    ctx.translate(10 - recoil, 0);
+    if (Math.cos(aim) < 0) ctx.scale(1, -1);
     switch (w.kind) {
       case 'bow':
         ctx.strokeStyle = '#8a5a2b';
@@ -1197,6 +1638,36 @@ export class ActionCombat {
         ctx.fillRect(-2, -2, 4, 4);
         break;
       case 'fist':
+        break;
+      case 'pistol':
+        ctx.fillStyle = '#3a3a44';
+        ctx.fillRect(0, -2, 12, 4);
+        ctx.fillStyle = '#5a4030';
+        ctx.fillRect(-1, 0, 4, 6);
+        break;
+      case 'shotgun':
+        ctx.fillStyle = '#5a3a20';
+        ctx.fillRect(-4, -2, 8, 5);
+        ctx.fillStyle = '#44444e';
+        ctx.fillRect(4, -2, 16, 3);
+        ctx.fillRect(4, 1, 14, 2);
+        break;
+      case 'smg':
+        ctx.fillStyle = '#2e2e36';
+        ctx.fillRect(-2, -2, 15, 5);
+        ctx.fillRect(4, 3, 3, 6);
+        break;
+      case 'rifle':
+        ctx.fillStyle = '#3c4a34';
+        ctx.fillRect(-5, -2, 24, 4);
+        ctx.fillStyle = '#2a2a30';
+        ctx.fillRect(4, 2, 3, 5);
+        break;
+      case 'launcher':
+        ctx.fillStyle = '#4c5a3c';
+        ctx.fillRect(-4, -4, 20, 8);
+        ctx.fillStyle = '#ff9f43';
+        ctx.fillRect(15, -3, 3, 6);
         break;
       default:
         ctx.fillStyle = '#5a3a1a';
@@ -1235,6 +1706,19 @@ export class ActionCombat {
         ctx.fillRect(x, y + 32, 186, 6);
         ctx.fillStyle = '#4da6ff';
         ctx.fillRect(x, y + 32, 186 * actor.mpRate(), 6);
+        drawText(ctx, weaponProfile(actor.weapon()).gun || actor.weapon() ? (actor.weapon()?.name ?? '') : 'Fists', x + 200, y + 9, { size: 12, color: '#ffe7a0' });
+        let ay = y + 50;
+        for (const m of g.state.battleMembers()) {
+          if (m === actor) continue;
+          ctx.fillStyle = 'rgba(10,12,24,0.7)';
+          ctx.fillRect(x - 4, ay - 2, 120, 16);
+          drawText(ctx, m.name, x, ay + 6, { size: 11, color: m.isDead() ? '#888' : '#fff' });
+          ctx.fillStyle = '#300';
+          ctx.fillRect(x + 50, ay + 3, 62, 6);
+          ctx.fillStyle = '#5adf6a';
+          ctx.fillRect(x + 50, ay + 3, 62 * m.hpRate(), 6);
+          ay += 18;
+        }
       }
     }
     if (this.active && this.bossName) {

@@ -19,8 +19,23 @@ export class Follower extends Character {
     return this.map.host.state.party[this.memberIndex] ?? null;
   }
 
+  /** Controlled by the action-combat AI (fighting alongside the player). */
+  combatControlled = false;
+
+  actor() {
+    const id = this.actorId();
+    return id !== null ? this.map.host.state.actor(id) : null;
+  }
+
   isVisible(): boolean {
+    if (this.combatControlled && this.actor()?.isDead()) return false;
     return this.actorId() !== null && this.map.player.followersVisible && !this.map.player.transparent;
+  }
+
+  /** Advance the walking animation (used by the combat AI). */
+  animate(): void {
+    this.updateAnimation();
+    this.refreshBushDepth();
   }
 
   refreshGraphic(): void {
@@ -31,10 +46,13 @@ export class Follower extends Character {
 
   /** Free movement: walk along the leader's recent path. */
   followTrail(pt: { x: number; y: number; d: Direction }, moving: boolean): void {
-    this.realX = pt.x;
-    this.realY = pt.y;
-    this.x = Math.round(pt.x);
-    this.y = Math.round(pt.y);
+    // ease in so followers glide back into line after a fight
+    const far = Math.hypot(pt.x - this.realX, pt.y - this.realY) > 0.3;
+    this.realX += (pt.x - this.realX) * (far ? 0.18 : 1);
+    this.realY += (pt.y - this.realY) * (far ? 0.18 : 1);
+    if (far) moving = true;
+    this.x = Math.round(this.realX);
+    this.y = Math.round(this.realY);
     this.direction = pt.d;
     this.freeMoving = moving;
     this.opacity = this.map.player.opacity;
@@ -233,11 +251,12 @@ export class Player extends Character {
     if (this.aimDirection) this.setDirection(this.aimDirection);
     else if (mv.x || mv.y) this.setDirection(Math.abs(mv.x) > Math.abs(mv.y) ? (mv.x > 0 ? 6 : 4) : mv.y > 0 ? 2 : 8);
 
-    if (moving) {
+    if (moving || this.trail.length === 0) {
       this.trail.unshift({ x: this.realX, y: this.realY, d: this.direction });
       if (this.trail.length > 64) this.trail.length = 64;
     }
     this.followers.forEach((f, i) => {
+      if (f.combatControlled) return;
       const pt = this.trail[Math.min(this.trail.length - 1, (i + 1) * 14)] ?? { x: this.realX, y: this.realY, d: this.direction };
       f.followTrail(pt, moving);
     });

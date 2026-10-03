@@ -245,6 +245,9 @@ function buildVillage(): GameMap {
           { kind: 'item', id: 3, price: null },
           { kind: 'item', id: 4, price: null },
           { kind: 'item', id: 6, price: null },
+          { kind: 'weapon', id: 13, price: null },
+          { kind: 'weapon', id: 14, price: null },
+          { kind: 'weapon', id: 15, price: null },
           { kind: 'weapon', id: 2, price: null },
           { kind: 'weapon', id: 10, price: null },
           { kind: 'armor', id: 1, price: null },
@@ -464,7 +467,7 @@ function buildField(): GameMap {
     page({ conditions: [{ kind: 'switch', id: SW_MIRA, value: true }] }),
   ]);
   chest(m, 6, 4, giveItem(2), 'Hi-Potion');
-  chest(m, 36, 22, gold(150), '150 G');
+  chest(m, 36, 22, giveItem(16, 1, 'weapon'), 'an Assault Rifle');
   return m;
 }
 
@@ -528,7 +531,7 @@ function buildCave(): GameMap {
   door(m, 3, 21, [FIELD, 37, 13, 2], false);
 
   chest(m, 3, 7, giveItem(6), 'Phoenix Feather');
-  chest(m, 26, 20, giveItem(9, 2), '2 Fire Bombs');
+  chest(m, 26, 20, giveItem(17, 1, 'weapon'), 'a Grenade Launcher');
   chest(m, 9, 7, giveItem(3, 2), '2 Ethers');
   event(m, 'Save Crystal', 15, 10, [page({ sprite: 'crystal', stepAnime: true, commands: [say('', 'The crystal hums softly. Your wounds heal.'), { type: 'recoverAll', actorId: 0 }, playSe('heal'), choices([['Save', [{ type: 'openSave' }]], ['Cancel', []]])] })]);
 

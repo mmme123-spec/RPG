@@ -363,7 +363,7 @@ export function defaultSystem(): SystemSettings {
     variables: Array.from({ length: 20 }, () => ''),
     elements: ['Physical', 'Fire', 'Ice', 'Thunder', 'Water', 'Earth', 'Wind', 'Light', 'Darkness'],
     skillTypes: ['Magic', 'Special'],
-    weaponTypes: ['Sword', 'Axe', 'Dagger', 'Spear', 'Bow', 'Staff', 'Mace'],
+    weaponTypes: ['Sword', 'Axe', 'Dagger', 'Spear', 'Bow', 'Staff', 'Mace', 'Gun'],
     armorTypes: ['General', 'Light Armor', 'Heavy Armor', 'Robe', 'Small Shield', 'Large Shield'],
     terms: defaultTerms(),
     followers: true,
